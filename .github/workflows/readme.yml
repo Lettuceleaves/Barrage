@@ -20,9 +20,7 @@ jobs:
         with:
           python-version: '3.x'
 
-      # 注意：这里不需要 pip install 任何东西，直接用原生 Python
-
-      - name: AI Translation (Raw HTTP)
+      - name: AI Translation (Future Proof)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
@@ -34,6 +32,7 @@ jobs:
           import urllib.request
           import urllib.error
 
+          # 1. 基础检查
           api_key = os.environ.get('GEMINI_API_KEY')
           if not api_key:
               print("Error: GEMINI_API_KEY is missing.")
@@ -46,7 +45,18 @@ jobs:
           with open('README_CN.md', 'r', encoding='utf-8') as f:
               content = f.read()
 
-          # 构造 Prompt
+          # 2. 定义模型优先级列表 (响应你的需求：关注 3.0 和 2.5)
+          # 注意：模型名称通常遵循 gemini-版本号-型号 的规律
+          candidate_models = [
+              "gemini-3.0-flash",       # 优先尝试 3.0
+              "gemini-3.0-pro",
+              "gemini-2.5-flash",       # 其次尝试 2.5
+              "gemini-2.5-pro",
+              "gemini-2.0-flash",       # 2.0 正式版
+              "gemini-2.0-flash-exp"    # 最后的保底 (之前验证过存在的)
+          ]
+
+          # 3. 构造请求 Payload
           payload = {
               "contents": [{
                   "parts": [{"text": "Translate the following Markdown to English. Keep all formatting, links, and code blocks unchanged. Output ONLY the translated text:\n\n" + content}]
@@ -54,60 +64,58 @@ jobs:
           }
           data = json.dumps(payload).encode('utf-8')
 
-          # 候选模型列表：根据日志，优先尝试 2.0 (虽然之前报 429，但说明它存在)
-          models = [
-              "gemini-2.0-flash-exp",
-              "gemini-1.5-flash",
-              "gemini-1.5-flash-latest",
-              "gemini-1.5-pro"
-          ]
-
           success = False
 
-          for model in models:
+          # 4. 遍历尝试模型
+          for model in candidate_models:
               print(f"--- Trying model: {model} ---")
               url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
               req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
 
-              # 针对 429 (Rate Limit) 的重试循环
+              # 单个模型的重试逻辑 (针对 429/503)
               max_retries = 3
               for attempt in range(max_retries):
                   try:
                       with urllib.request.urlopen(req) as response:
                           result = json.loads(response.read().decode('utf-8'))
           
-                          # 解析响应
-                          try:
+                          # 解析成功
+                          if 'candidates' in result and len(result['candidates']) > 0:
                               translated_text = result['candidates'][0]['content']['parts'][0]['text']
                               with open('README.md', 'w', encoding='utf-8') as f:
                                   f.write(translated_text)
-                              print(f"Success! Translated using {model}.")
+                              print(f"✅ Success! Translated using {model}.")
                               success = True
-                              break # 跳出重试循环
-                          except (KeyError, IndexError) as e:
-                              print(f"Error parsing response: {result}")
-                              break # 格式不对，换下一个模型
-          
-                  except urllib.error.HTTPError as e:
-                      if e.code == 429:
-                          print(f"Rate limit hit (429). Waiting 30 seconds... (Attempt {attempt+1}/{max_retries})")
-                          time.sleep(30) # 强制休眠 30 秒
-                          continue # 重试当前模型
-                      elif e.code == 404:
-                          print(f"Model not found (404): {model}")
-                          break # 换下一个模型
-                      else:
-                          print(f"HTTP Error {e.code}: {e.read().decode('utf-8')}")
-                          break # 其他错误，换下一个模型
-                  except Exception as e:
-                      print(f"Unknown error: {e}")
-                      break
+                              break 
+                          else:
+                              print(f"⚠️ Empty response candidates from {model}")
+                              break # 换下一个模型
 
+                  except urllib.error.HTTPError as e:
+                      if e.code == 404:
+                          print(f"❌ Model not found (404): {model} - Skipping.")
+                          break # 这个版本不存在，直接试下一个
+                      elif e.code == 429:
+                          wait_time = 70 # 激进的等待策略
+                          print(f"⏳ Rate limit (429) on {model}. Waiting {wait_time}s... (Attempt {attempt+1})")
+                          time.sleep(wait_time)
+                          continue # 继续重试当前模型
+                      elif e.code >= 500:
+                          print(f"🔥 Server error ({e.code}). Retrying...")
+                          time.sleep(5)
+                          continue
+                      else:
+                          print(f"❌ HTTP Error {e.code}: {e.read().decode('utf-8')}")
+                          break 
+                  except Exception as e:
+                      print(f"❌ Unknown error: {e}")
+                      break
+          
               if success:
-                  break # 任务完成，跳出模型循环
+                  break # 只要有一个成功，就结束整个流程
 
           if not success:
-              print("All models failed.")
+              print("💀 All candidate models failed.")
               sys.exit(1)
           EOF
 
