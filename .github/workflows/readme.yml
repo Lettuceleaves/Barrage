@@ -1,4 +1,4 @@
-name: Generate README
+name: AI Translate README
 
 on:
   push:
@@ -6,23 +6,127 @@ on:
       - 'README_CN.md'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  generate:
+  translate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Generate README
-        run: python scripts/generate_readme.py
-      - name: Commit README
+
+      - name: AI Translation (Future Proof)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          git config user.name 'github-actions'
-          git config user.email 'github-actions@github.com'
+          python - <<EOF
+          import os
+          import sys
+          import json
+          import time
+          import urllib.request
+          import urllib.error
+
+          # 1. 基础检查
+          api_key = os.environ.get('GEMINI_API_KEY')
+          if not api_key:
+              print("Error: GEMINI_API_KEY is missing.")
+              sys.exit(1)
+
+          if not os.path.exists('README_CN.md'):
+              print("Error: README_CN.md not found.")
+              sys.exit(1)
+
+          with open('README_CN.md', 'r', encoding='utf-8') as f:
+              content = f.read()
+
+          # 2. 定义模型优先级列表 (响应你的需求：关注 3.0 和 2.5)
+          # 注意：模型名称通常遵循 gemini-版本号-型号 的规律
+          candidate_models = [
+              "gemini-3.0-flash",       # 优先尝试 3.0
+              "gemini-3.0-pro",
+              "gemini-2.5-flash",       # 其次尝试 2.5
+              "gemini-2.5-pro",
+              "gemini-2.0-flash",       # 2.0 正式版
+              "gemini-2.0-flash-exp"    # 最后的保底 (之前验证过存在的)
+          ]
+
+          # 3. 构造请求 Payload
+          payload = {
+              "contents": [{
+                  "parts": [{"text": "Translate the following Markdown to English. Keep all formatting, links, and code blocks unchanged. Output ONLY the translated text:\n\n" + content}]
+              }]
+          }
+          data = json.dumps(payload).encode('utf-8')
+
+          success = False
+
+          # 4. 遍历尝试模型
+          for model in candidate_models:
+              print(f"--- Trying model: {model} ---")
+              url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+              req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+
+              # 单个模型的重试逻辑 (针对 429/503)
+              max_retries = 3
+              for attempt in range(max_retries):
+                  try:
+                      with urllib.request.urlopen(req) as response:
+                          result = json.loads(response.read().decode('utf-8'))
+          
+                          # 解析成功
+                          if 'candidates' in result and len(result['candidates']) > 0:
+                              translated_text = result['candidates'][0]['content']['parts'][0]['text']
+                              with open('README.md', 'w', encoding='utf-8') as f:
+                                  f.write(translated_text)
+                              print(f"✅ Success! Translated using {model}.")
+                              success = True
+                              break 
+                          else:
+                              print(f"⚠️ Empty response candidates from {model}")
+                              break # 换下一个模型
+
+                  except urllib.error.HTTPError as e:
+                      if e.code == 404:
+                          print(f"❌ Model not found (404): {model} - Skipping.")
+                          break # 这个版本不存在，直接试下一个
+                      elif e.code == 429:
+                          wait_time = 70 # 激进的等待策略
+                          print(f"⏳ Rate limit (429) on {model}. Waiting {wait_time}s... (Attempt {attempt+1})")
+                          time.sleep(wait_time)
+                          continue # 继续重试当前模型
+                      elif e.code >= 500:
+                          print(f"🔥 Server error ({e.code}). Retrying...")
+                          time.sleep(5)
+                          continue
+                      else:
+                          print(f"❌ HTTP Error {e.code}: {e.read().decode('utf-8')}")
+                          break 
+                  except Exception as e:
+                      print(f"❌ Unknown error: {e}")
+                      break
+          
+              if success:
+                  break # 只要有一个成功，就结束整个流程
+
+          if not success:
+              print("💀 All candidate models failed.")
+              sys.exit(1)
+          EOF
+
+      - name: Commit and Push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add README.md
-          git commit -m 'Update README from README_CN'
-          git push
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m 'docs: AI Auto-translate README_CN to README'
+            git push
+          fi
