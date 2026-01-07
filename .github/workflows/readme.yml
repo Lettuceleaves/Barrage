@@ -20,8 +20,9 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install Google GenAI Library
-        run: pip install -U google-genai
+      - name: Install Stable Library
+        # 回退到兼容性最好的旧版 SDK
+        run: pip install -q -U google-generativeai
 
       - name: AI Translation
         env:
@@ -30,64 +31,66 @@ jobs:
           python - <<EOF
           import os
           import sys
-          
-          # 导入 Google GenAI SDK
-          try:
-              from google import genai
-              from google.genai import types
-          except ImportError:
-              print("Critical Error: Failed to import google.genai")
-              sys.exit(1)
+          import time
+          import google.generativeai as genai
+          from google.api_core import exceptions
 
+          # 配置 API
           api_key = os.environ.get('GEMINI_API_KEY')
           if not api_key:
-              print("Error: GEMINI_API_KEY not found.")
+              print("Error: GEMINI_API_KEY missing.")
               sys.exit(1)
+          
+          genai.configure(api_key=api_key)
 
-          client = genai.Client(api_key=api_key)
-
-          # 读取中文文件
+          # 读取文件
           if not os.path.exists('README_CN.md'):
               print("Error: README_CN.md not found.")
               sys.exit(1)
-
+          
           with open('README_CN.md', 'r', encoding='utf-8') as f:
               content = f.read()
 
-          # --- 核心改进：模型重试列表 ---
-          # 如果别名(alias)失败，就尝试具体版本号(versioned)，如果Flash失败，就尝试Pro
-          candidate_models = [
-              "gemini-1.5-flash", 
-              "gemini-1.5-flash-001", 
-              "gemini-1.5-pro",
-              "gemini-1.5-pro-001",
-              "gemini-2.0-flash-exp" # 最新的实验版
-          ]
-
-          prompt_text = f"Translate the following Markdown to English. Keep all formatting, links, and code blocks unchanged. Output only the translated text:\n\n{content}"
+          # 定义模型尝试列表 (优先使用 Flash，备用 Pro)
+          # 注意：在旧版 SDK 中，模型名称通常不需要带版本号后缀
+          models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
           
-          translation_success = False
+          prompt = f"Translate the following Markdown to English. Keep all formatting, links, and code blocks unchanged. Output only the translated text:\n\n{content}"
 
-          for model_id in candidate_models:
-              print(f"Trying model: {model_id} ...")
+          success = False
+
+          for model_name in models_to_try:
+              print(f"Testing model: {model_name}...")
               try:
-                  response = client.models.generate_content(
-                      model=model_id,
-                      contents=prompt_text
-                  )
+                  model = genai.GenerativeModel(model_name)
+                  response = model.generate_content(prompt)
           
                   if response.text:
                       with open('README.md', 'w', encoding='utf-8') as f:
                           f.write(response.text)
-                      print(f"Success! Translated using {model_id}.")
-                      translation_success = True
-                      break # 成功则跳出循环
-              except Exception as e:
-                  print(f"Failed with {model_id}: {e}")
-                  continue # 失败则尝试下一个
+                      print(f"Success! Translated using {model_name}")
+                      success = True
+                      break
+          
+              except exceptions.ResourceExhausted:
+                  print(f"Rate limit hit for {model_name}. Sleeping for 20s...")
+                  time.sleep(20) # 遇到 429 等待 20秒
+                  try:
+                      print("Retrying...")
+                      response = model.generate_content(prompt)
+                      with open('README.md', 'w', encoding='utf-8') as f:
+                          f.write(response.text)
+                      success = True
+                      break
+                  except Exception as e:
+                       print(f"Retry failed: {e}")
 
-          if not translation_success:
-              print("All models failed.")
+              except Exception as e:
+                  print(f"Failed with {model_name}: {e}")
+                  continue
+
+          if not success:
+              print("All attempts failed.")
               sys.exit(1)
           EOF
 
