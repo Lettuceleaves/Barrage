@@ -2,8 +2,6 @@ name: AI Translate README
 
 on:
   push:
-    paths:
-      - 'README_CN.md'
   workflow_dispatch:
 
 jobs:
