@@ -1,7 +1,13 @@
 name: AI Translate README
 
 on:
+  push:
+    paths:
+      - 'README_CN.md'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   translate:
@@ -14,9 +20,9 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install New AI Library
-        # 切换到最新的 google-genai 库
-        run: pip install -q -U google-genai
+      - name: Install Google GenAI Library
+        # 1. 确保安装的是这个新库
+        run: pip install -U google-genai
 
       - name: AI Translation
         env:
@@ -24,42 +30,56 @@ jobs:
         run: |
           python - <<EOF
           import os
-          from genai import Client
-
-          # 初始化最新的客户端
-          client = Client(api_key=os.environ['GEMINI_API_KEY'])
+          import sys
           
-          # 建议使用 gemini-1.5-flash，速度快且完全满足翻译需求
-          model_id = "gemini-1.5-flash"
+          # 2. 核心修正：必须从 google 命名空间导入
+          try:
+              from google import genai
+          except ImportError:
+              print("Critical Error: Could not import 'google.genai'.")
+              sys.exit(1)
 
-          # 读取中文 README
+          # 初始化客户端
+          api_key = os.environ.get('GEMINI_API_KEY')
+          if not api_key:
+              print("Error: GEMINI_API_KEY is missing.")
+              sys.exit(1)
+          
+          client = genai.Client(api_key=api_key)
+          
+          # 读取文件
           if not os.path.exists('README_CN.md'):
-              print("Error: README_CN.md not found")
-              exit(1)
+              print("Error: README_CN.md file not found.")
+              sys.exit(1)
           
           with open('README_CN.md', 'r', encoding='utf-8') as f:
               content = f.read()
 
-          prompt = f"Translate the following Markdown content to English. Keep Markdown syntax, links, and code blocks unchanged. Output only the translated text:\n\n{content}"
+          print(f"Translating {len(content)} characters...")
+
+          # 3. 调用 API (使用 flash 模型)
+          try:
+              response = client.models.generate_content(
+                  model="gemini-1.5-flash",
+                  contents=f"Translate the following Markdown to English. Keep all formatting/links/code unchanged:\n\n{content}"
+              )
           
-          # 调用最新 API
-          response = client.models.generate_content(
-              model=model_id,
-              contents=prompt
-          )
+              with open('README.md', 'w', encoding='utf-8') as f:
+                  f.write(response.text)
+              print("Success: README.md updated.")
           
-          # 写入英文 README
-          with open('README.md', 'w', encoding='utf-8') as f:
-              f.write(response.text)
+          except Exception as e:
+              print(f"API Error: {e}")
+              sys.exit(1)
           EOF
 
       - name: Commit and Push
         run: |
-          git config user.name 'github-actions'
-          git config user.email 'github-actions@github.com'
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add README.md
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "No changes to commit."
           else
             git commit -m 'docs: AI Auto-translate README_CN to README'
             git push
