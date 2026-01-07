@@ -66,8 +66,15 @@
                         <argLine>--enable-native-access=ALL-UNNAMED</argLine>
                     </configuration>
                 </plugin>
-            </plugins>
-        </pluginManagement>
-    </build>
+                <plugin>
+                  <groupId>com.github.spotbugs</groupId>
+                  <artifactId>spotbugs-maven-plugin</artifactId>
+                  <version>4.7.3.0</version>
+                  <configuration>
+                    <failOnError>true</failOnError>
+                    <excludeFilterFile>${project.basedir}/spotbugs-excludes.xml</excludeFilterFile>
+                  </configuration>
+                </plugin>
+              </plugins>
 
 </project>
