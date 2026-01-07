@@ -11,13 +11,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 🔴 关键修改：将环境切换为 JDK 25
+      # --- 关键修复步骤开始 ---
+      # 你的测试 EnvironmentCheckTest 依赖 io_uring 的 C 库
+      # ubuntu-latest 默认不带开发头文件，必须手动安装
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liburing-dev
+      # --- 关键修复步骤结束 ---
+
       - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
           java-version: '25'
-          # 如果 temurin 报错找不到 25，可以尝试改为 'zulu' 或 'oracle'
-          distribution: 'temurin'
+          distribution: 'temurin' # 如果这里报错找不到25，可以换成 'zulu'
 
       - name: Cache Maven packages
         uses: actions/cache@v4
@@ -27,16 +34,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-maven-
 
+      # 执行编译和测试 (此时 liburing 及其头文件已存在，EnvironmentCheckTest 应该能通过)
       - name: Build and Test
         run: mvn -B clean verify
 
-      # 创建排除文件（防止 SpotBugs 找不到文件报错）
+      # 防止 SpotBugs 找不到排除文件报错
       - name: Ensure SpotBugs excludes file
         run: |
           if [ ! -f spotbugs-excludes.xml ]; then
             echo '<?xml version="1.0" encoding="UTF-8"?><FindBugsFilter></FindBugsFilter>' > spotbugs-excludes.xml
           fi
 
-      # 单独运行检查，确保能看到显式的报错
+      # 显式运行 SpotBugs 检查
       - name: SpotBugs analysis
         run: mvn spotbugs:check -Dspotbugs.failOnError=true
