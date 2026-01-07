@@ -1,4 +1,4 @@
-name: Generate README
+name: AI Translate README
 
 on:
   push:
@@ -7,22 +7,52 @@ on:
   workflow_dispatch:
 
 jobs:
-  generate:
+  translate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Generate README
-        run: python scripts/generate_readme.py
-      - name: Commit README
+
+      - name: Install AI Library
+        run: pip install -q -U google-generativeai
+
+      - name: AI Translation
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python - <<EOF
+          import os
+          import google.generativeai as genai
+
+          genai.configure(api_key=os.environ['GEMINI_API_KEY'])
+          model = genai.GenerativeModel('gemini-pro')
+
+          # 读取中文 README
+          with open('README_CN.md', 'r', encoding='utf-8') as f:
+              content = f.read()
+
+          prompt = f"Please translate the following Markdown content into English. Keep the original Markdown format, technical terms, and links. Output ONLY the translated content:\n\n{content}"
+          
+          response = model.generate_content(prompt)
+          
+          # 写入英文 README
+          with open('README.md', 'w', encoding='utf-8') as f:
+              f.write(response.text)
+          EOF
+
+      - name: Commit and Push
         run: |
           git config user.name 'github-actions'
           git config user.email 'github-actions@github.com'
+          # 检查是否有内容变化，防止空提交报错
           git add README.md
-          git commit -m 'Update README from README_CN'
-          git push
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m 'AI Auto-translate README_CN to README'
+            git push
+          fi
