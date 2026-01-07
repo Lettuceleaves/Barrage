@@ -1,7 +1,6 @@
 name: AI Translate README
 
 on:
-  push:
   workflow_dispatch:
 
 jobs:
@@ -15,8 +14,9 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install AI Library
-        run: pip install -q -U google-generativeai
+      - name: Install New AI Library
+        # 切换到最新的 google-genai 库
+        run: pip install -q -U google-genai
 
       - name: AI Translation
         env:
@@ -24,18 +24,29 @@ jobs:
         run: |
           python - <<EOF
           import os
-          import google.generativeai as genai
+          from genai import Client
 
-          genai.configure(api_key=os.environ['GEMINI_API_KEY'])
-          model = genai.GenerativeModel('gemini-pro')
+          # 初始化最新的客户端
+          client = Client(api_key=os.environ['GEMINI_API_KEY'])
+          
+          # 建议使用 gemini-1.5-flash，速度快且完全满足翻译需求
+          model_id = "gemini-1.5-flash"
 
           # 读取中文 README
+          if not os.path.exists('README_CN.md'):
+              print("Error: README_CN.md not found")
+              exit(1)
+          
           with open('README_CN.md', 'r', encoding='utf-8') as f:
               content = f.read()
 
-          prompt = f"Please translate the following Markdown content into English. Keep the original Markdown format, technical terms, and links. Output ONLY the translated content:\n\n{content}"
+          prompt = f"Translate the following Markdown content to English. Keep Markdown syntax, links, and code blocks unchanged. Output only the translated text:\n\n{content}"
           
-          response = model.generate_content(prompt)
+          # 调用最新 API
+          response = client.models.generate_content(
+              model=model_id,
+              contents=prompt
+          )
           
           # 写入英文 README
           with open('README.md', 'w', encoding='utf-8') as f:
@@ -46,7 +57,6 @@ jobs:
         run: |
           git config user.name 'github-actions'
           git config user.email 'github-actions@github.com'
-          # 检查是否有内容变化，防止空提交报错
           git add README.md
           if git diff --staged --quiet; then
             echo "No changes to commit"
