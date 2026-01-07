@@ -61,6 +61,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m 'AI Auto-translate README_CN to README'
+            git commit -m 'docs: AI Auto-translate README_CN to README'
             git push
           fi
