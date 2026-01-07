@@ -1,0 +1,19 @@
+{
+    "name": "Barrage Project (JDK 25)",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "remoteEnv": {
+        "JAVA_HOME": "/opt/graalvm-25",
+        "PATH": "/opt/graalvm-25/bin:${containerEnv:PATH}"
+    },
+    "customizations": {
+        "jetbrains": {
+            "backend": "IntelliJ",
+            "settings": {
+                "jdk.home": "/opt/graalvm-25"
+            }
+        }
+    },
+    "remoteUser": "root"
+}

@@ -25,3 +25,10 @@ replay_pid*
 
 # IDEA config
 .idea
+
+# project log
+barrage.log
+test-results-native
+
+# targets
+**/target/
