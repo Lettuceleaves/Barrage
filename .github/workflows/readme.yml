@@ -20,77 +20,94 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install Stable Library
-        # 回退到兼容性最好的旧版 SDK
-        run: pip install -q -U google-generativeai
+      # 注意：这里不需要 pip install 任何东西，直接用原生 Python
 
-      - name: AI Translation
+      - name: AI Translation (Raw HTTP)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python - <<EOF
           import os
           import sys
+          import json
           import time
-          import google.generativeai as genai
-          from google.api_core import exceptions
+          import urllib.request
+          import urllib.error
 
-          # 配置 API
           api_key = os.environ.get('GEMINI_API_KEY')
           if not api_key:
-              print("Error: GEMINI_API_KEY missing.")
+              print("Error: GEMINI_API_KEY is missing.")
               sys.exit(1)
-          
-          genai.configure(api_key=api_key)
 
-          # 读取文件
           if not os.path.exists('README_CN.md'):
               print("Error: README_CN.md not found.")
               sys.exit(1)
-          
+
           with open('README_CN.md', 'r', encoding='utf-8') as f:
               content = f.read()
 
-          # 定义模型尝试列表 (优先使用 Flash，备用 Pro)
-          # 注意：在旧版 SDK 中，模型名称通常不需要带版本号后缀
-          models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
-          
-          prompt = f"Translate the following Markdown to English. Keep all formatting, links, and code blocks unchanged. Output only the translated text:\n\n{content}"
+          # 构造 Prompt
+          payload = {
+              "contents": [{
+                  "parts": [{"text": "Translate the following Markdown to English. Keep all formatting, links, and code blocks unchanged. Output ONLY the translated text:\n\n" + content}]
+              }]
+          }
+          data = json.dumps(payload).encode('utf-8')
+
+          # 候选模型列表：根据日志，优先尝试 2.0 (虽然之前报 429，但说明它存在)
+          models = [
+              "gemini-2.0-flash-exp",
+              "gemini-1.5-flash",
+              "gemini-1.5-flash-latest",
+              "gemini-1.5-pro"
+          ]
 
           success = False
 
-          for model_name in models_to_try:
-              print(f"Testing model: {model_name}...")
-              try:
-                  model = genai.GenerativeModel(model_name)
-                  response = model.generate_content(prompt)
-          
-                  if response.text:
-                      with open('README.md', 'w', encoding='utf-8') as f:
-                          f.write(response.text)
-                      print(f"Success! Translated using {model_name}")
-                      success = True
-                      break
-          
-              except exceptions.ResourceExhausted:
-                  print(f"Rate limit hit for {model_name}. Sleeping for 20s...")
-                  time.sleep(20) # 遇到 429 等待 20秒
-                  try:
-                      print("Retrying...")
-                      response = model.generate_content(prompt)
-                      with open('README.md', 'w', encoding='utf-8') as f:
-                          f.write(response.text)
-                      success = True
-                      break
-                  except Exception as e:
-                       print(f"Retry failed: {e}")
+          for model in models:
+              print(f"--- Trying model: {model} ---")
+              url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+              req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
 
-              except Exception as e:
-                  print(f"Failed with {model_name}: {e}")
-                  continue
+              # 针对 429 (Rate Limit) 的重试循环
+              max_retries = 3
+              for attempt in range(max_retries):
+                  try:
+                      with urllib.request.urlopen(req) as response:
+                          result = json.loads(response.read().decode('utf-8'))
+          
+                          # 解析响应
+                          try:
+                              translated_text = result['candidates'][0]['content']['parts'][0]['text']
+                              with open('README.md', 'w', encoding='utf-8') as f:
+                                  f.write(translated_text)
+                              print(f"Success! Translated using {model}.")
+                              success = True
+                              break # 跳出重试循环
+                          except (KeyError, IndexError) as e:
+                              print(f"Error parsing response: {result}")
+                              break # 格式不对，换下一个模型
+          
+                  except urllib.error.HTTPError as e:
+                      if e.code == 429:
+                          print(f"Rate limit hit (429). Waiting 30 seconds... (Attempt {attempt+1}/{max_retries})")
+                          time.sleep(30) # 强制休眠 30 秒
+                          continue # 重试当前模型
+                      elif e.code == 404:
+                          print(f"Model not found (404): {model}")
+                          break # 换下一个模型
+                      else:
+                          print(f"HTTP Error {e.code}: {e.read().decode('utf-8')}")
+                          break # 其他错误，换下一个模型
+                  except Exception as e:
+                      print(f"Unknown error: {e}")
+                      break
+
+              if success:
+                  break # 任务完成，跳出模型循环
 
           if not success:
-              print("All attempts failed.")
+              print("All models failed.")
               sys.exit(1)
           EOF
 
