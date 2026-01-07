@@ -1,12 +1,9 @@
 name: CI
 
 on:
-  # 1. 允许手动触发
-  workflow_dispatch:
-  # 2. 新增：允许代码提交时自动触发（这是为了让它先跑起来）
   push:
-    branches:
-      - '*'  # 匹配所有分支，或者写具体的 'main'
+    branches: [ "*" ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -14,10 +11,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      # 🔴 关键修改：将环境切换为 JDK 25
+      - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '25'
+          # 如果 temurin 报错找不到 25，可以尝试改为 'zulu' 或 'oracle'
           distribution: 'temurin'
 
       - name: Cache Maven packages
@@ -31,12 +30,13 @@ jobs:
       - name: Build and Test
         run: mvn -B clean verify
 
+      # 创建排除文件（防止 SpotBugs 找不到文件报错）
       - name: Ensure SpotBugs excludes file
         run: |
           if [ ! -f spotbugs-excludes.xml ]; then
             echo '<?xml version="1.0" encoding="UTF-8"?><FindBugsFilter></FindBugsFilter>' > spotbugs-excludes.xml
           fi
 
+      # 单独运行检查，确保能看到显式的报错
       - name: SpotBugs analysis
-        # 注意：你之前把中文写在命令行里了，会导致语法错误，这里已修正
-        run: mvn spotbugs:check -Dspotbugs.failOnError=true -Dspotbugs.excludeFilterFile=spotbugs-excludes.xml
+        run: mvn spotbugs:check -Dspotbugs.failOnError=true
