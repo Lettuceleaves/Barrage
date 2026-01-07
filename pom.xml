@@ -25,7 +25,8 @@
 
         <native.maven.plugin.version>0.10.3</native.maven.plugin.version>
         <junit.version>5.10.2</junit.version>
-        <spotbugs.version>4.7.3.0</spotbugs.version>
+        <spotbugs.version>4.8.6.0</spotbugs.version>
+        <asm.version>9.9.1</asm.version>
     </properties>
 
     <dependencyManagement>
@@ -90,10 +91,45 @@
             <plugin>
                 <groupId>com.github.spotbugs</groupId>
                 <artifactId>spotbugs-maven-plugin</artifactId>
+                <version>${spotbugs.version}</version>
                 <configuration>
                     <failOnError>true</failOnError>
                     <excludeFilterFile>${maven.multiModuleProjectDirectory}/spotbugs-excludes.xml</excludeFilterFile>
                 </configuration>
+
+                <dependencies>
+                    <dependency>
+                        <groupId>com.github.spotbugs</groupId>
+                        <artifactId>spotbugs</artifactId>
+                        <version>4.8.6</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.ow2.asm</groupId>
+                        <artifactId>asm</artifactId>
+                        <version>${asm.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.ow2.asm</groupId>
+                        <artifactId>asm-tree</artifactId>
+                        <version>${asm.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.ow2.asm</groupId>
+                        <artifactId>asm-commons</artifactId>
+                        <version>${asm.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.ow2.asm</groupId>
+                        <artifactId>asm-util</artifactId>
+                        <version>${asm.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>org.ow2.asm</groupId>
+                        <artifactId>asm-analysis</artifactId>
+                        <version>${asm.version}</version>
+                    </dependency>
+                </dependencies>
+
                 <executions>
                     <execution>
                         <id>scan</id>

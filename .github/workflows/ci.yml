@@ -12,14 +12,14 @@ jobs:
       - uses: actions/checkout@v4
 
       # 1. 安装 liburing 依赖
-      # 这是为了让你的 EnvironmentCheckTest 能在 Ubuntu 上通过
+      # 这是为了让 EnvironmentCheckTest (依赖 FFM/io_uring) 能在 Ubuntu 上通过
       - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y liburing-dev
 
       # 2. 配置标准 JDK 25
-      # Temurin 版本只包含 JVM，不包含 native-image 工具，所以后面必须跳过 native 测试
+      # Temurin 是目前对新版本支持较好的发行版
       - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
@@ -34,18 +34,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-maven-
 
-      # 3. 核心修改：构建并测试，但跳过 Native Image 相关任务
-      # -DskipNativeTests 会告诉 native-maven-plugin 不要执行 native:test
-      - name: Build and Test
-        run: mvn -B clean verify -DskipNativeTests
-
-      # 4. 防止 SpotBugs 找不到排除文件报错
+      # 3. [关键] 预先创建 SpotBugs 排除文件
+      # 必须在 mvn verify 之前执行，否则 SpotBugs 启动时找不到文件会报错
       - name: Ensure SpotBugs excludes file
         run: |
           if [ ! -f spotbugs-excludes.xml ]; then
             echo '<?xml version="1.0" encoding="UTF-8"?><FindBugsFilter></FindBugsFilter>' > spotbugs-excludes.xml
           fi
 
-      # 5. 运行代码静态分析
-      - name: SpotBugs analysis
-        run: mvn spotbugs:check -Dspotbugs.failOnError=true
+      # 4. 构建、测试并进行静态分析
+      # -B: 批处理模式 (减少日志干扰)
+      # verify: 会自动触发绑定的 spotbugs:check
+      # -DskipNativeTests: 跳过 GraalVM 原生测试 (因为只有 JDK 环境)
+      # 注意：这里不再需要 -Dspotbugs.skip=true，因为我们已经在 POM 里升级了 ASM 9.9.1
+      - name: Build and Test
+        run: mvn -B clean verify -DskipNativeTests
