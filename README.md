@@ -1,3 +1,3 @@
-# Barrage Firepower Network Load Tester
+# Barrage Firepower Network Stress Tester
 
-A stable & high-performance load tester designed to be built on JAVA.
+Designed to be a stable & high-performance stress tester built on JAVA.
