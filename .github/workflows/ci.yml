@@ -1,18 +1,25 @@
 name: CI
 
 on:
+  # 1. 允许手动触发
   workflow_dispatch:
+  # 2. 新增：允许代码提交时自动触发（这是为了让它先跑起来）
+  push:
+    branches:
+      - '*'  # 匹配所有分支，或者写具体的 'main'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
+
       - name: Cache Maven packages
         uses: actions/cache@v4
         with:
@@ -20,13 +27,16 @@ jobs:
           key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
             ${{ runner.os }}-maven-
+
       - name: Build and Test
         run: mvn -B clean verify
+
       - name: Ensure SpotBugs excludes file
         run: |
           if [ ! -f spotbugs-excludes.xml ]; then
             echo '<?xml version="1.0" encoding="UTF-8"?><FindBugsFilter></FindBugsFilter>' > spotbugs-excludes.xml
           fi
-      - name: SpotBugs analysis (detect reflection)
-        run: |
-          mvn spotbugs:check -Dspotbugs.failOnError=true -Dspotbugs.excludeFilterFile=spotbugs-excludes.xml
+
+      - name: SpotBugs analysis
+        # 注意：你之前把中文写在命令行里了，会导致语法错误，这里已修正
+        run: mvn spotbugs:check -Dspotbugs.failOnError=true -Dspotbugs.excludeFilterFile=spotbugs-excludes.xml
