@@ -33,7 +33,7 @@ public class IoUringHttpTest {
     public void testSendOffHeapRequest() throws Exception {
         // High count for sustained traffic monitoring, but keep test duration reasonable for CI
         // User can manually increase this variable for their long-running observations
-        int requestCount = 10_000_000; 
+        int requestCount = 100;
         
         // 1. Setup blocking HTTP server with Keep-Alive support
         CountDownLatch serverReady = new CountDownLatch(1);
