@@ -39,6 +39,9 @@
                         <artifactId>native-maven-plugin</artifactId>
                         <version>${native.maven.plugin.version}</version>
                         <extensions>true</extensions>
+                        <configuration>
+                            <mainClass>com.barrage.cli.Main</mainClass>
+                        </configuration>
                         <executions>
                             <execution>
                                 <id>build-native</id>

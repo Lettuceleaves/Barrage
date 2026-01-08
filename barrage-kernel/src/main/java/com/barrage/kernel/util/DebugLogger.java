@@ -11,10 +11,10 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
 /**
- * 一个简单、无反射、零依赖的日志工具，用于调试和测试信息的记录.
+ * 简单的、无反射、零依赖的日志工具，用于调试和测试。
  * <p>
- * 该类设计为静态工具类，直接将日志写入指定文件.
- * 不使用任何复杂框架以确保在 Native Image 环境下的绝对稳定性.
+ * 此类旨在作为一个静态工具，直接将日志写入指定文件。
+ * 它避免使用复杂的框架，以确保在 Native Image（原生镜像）环境下的绝对稳定性。
  * </p>
  */
 public class DebugLogger {
@@ -25,35 +25,56 @@ public class DebugLogger {
     private static boolean consoleOutput = true;
 
     /**
-     * 配置日志文件路径.
+     * 配置日志文件路径。
      *
-     * @param filePath 日志文件路径
+     * @param filePath 日志文件的路径。
      */
     public static void setLogFile(String filePath) {
         logPath = Paths.get(filePath);
     }
 
     /**
-     * 启用或禁用控制台输出 (默认开启).
+     * 启用或禁用控制台输出。默认为 {@code true}。
      *
-     * @param enabled 是否输出到控制台
+     * @param enabled {@code true} 表示启用控制台输出，{@code false} 表示禁用。
      */
     public static void setConsoleOutput(boolean enabled) {
         consoleOutput = enabled;
     }
 
+    /**
+     * 记录一条 INFO 级别的消息。
+     *
+     * @param message 要记录的消息内容。
+     */
     public static void info(String message) {
         log("INFO", message);
     }
 
+    /**
+     * 记录一条 ERROR 级别的消息。
+     *
+     * @param message 要记录的消息内容。
+     */
     public static void error(String message) {
         log("ERROR", message);
     }
 
+    /**
+     * 记录一条 DEBUG 级别的消息。
+     *
+     * @param message 要记录的消息内容。
+     */
     public static void debug(String message) {
         log("DEBUG", message);
     }
 
+    /**
+     * 核心日志逻辑。通过 synchronized 确保写入文件时的线程安全。
+     *
+     * @param level   日志级别（如 INFO, ERROR, DEBUG）。
+     * @param message 消息内容。
+     */
     private static synchronized void log(String level, String message) {
         String timestamp = LocalDateTime.now().format(TIME_FORMATTER);
         String threadName = Thread.currentThread().getName();
@@ -68,7 +89,7 @@ public class DebugLogger {
         }
 
         try {
-            // 简单的 append 写入
+            // Append log entry to file
             Files.writeString(logPath, logEntry + System.lineSeparator(), 
                 StandardOpenOption.CREATE, StandardOpenOption.APPEND, StandardOpenOption.WRITE);
         } catch (IOException e) {
