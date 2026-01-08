@@ -11,6 +11,7 @@ Barrage 是基于 Java 构建的高性能、稳定的压测工具，旨在帮助
 - 支持自定义并发线程数和请求速率
 - 多协议支持（HTTP、HTTPS）
 - 丰富的统计信息与实时监控
+- **极致性能**: 基于 Java 25 FFM + io_uring，支持零拷贝与零系统调用（详情见 [barrage-kernel](file:///workspaces/Barrage/barrage-kernel/README_CN.md)）
 - 可通过 Maven Central 直接获取依赖
 
 ## 技术栈

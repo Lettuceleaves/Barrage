@@ -22,6 +22,8 @@ public class IoUring implements Closeable {
     private static final MethodHandle IO_URING_SETUP;
     // io_uring_enter(int fd, unsigned to_submit, unsigned min_complete, unsigned flags, sigset_t *sig)
     private static final MethodHandle IO_URING_ENTER;
+    // io_uring_register(int fd, unsigned opcode, void *arg, unsigned nr_args)
+    private static final MethodHandle IO_URING_REGISTER;
     
     // Mmap handle: void* mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset)
     private static final MethodHandle MMAP;
@@ -29,6 +31,10 @@ public class IoUring implements Closeable {
     private static final MethodHandle MUNMAP;
     // Close handle: int close(int fd)
     private static final MethodHandle CLOSE;
+    // Fcntl handle: int fcntl(int fd, int cmd, int arg)
+    private static final MethodHandle FCNTL;
+    // Socketpair handle: int socketpair(int domain, int type, int protocol, void* sv)
+    private static final MethodHandle SOCKETPAIR;
     
     // Socket functions
     private static final MethodHandle SOCKET;
@@ -46,6 +52,11 @@ public class IoUring implements Closeable {
             IO_URING_ENTER = LINKER.downcallHandle(
                 LIBURING.find("io_uring_enter").orElseThrow(),
                 FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS)
+            );
+
+            IO_URING_REGISTER = LINKER.downcallHandle(
+                LIBURING.find("io_uring_register").orElseThrow(),
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT)
             );
 
             MMAP = LINKER.downcallHandle(
@@ -71,6 +82,16 @@ public class IoUring implements Closeable {
             CONNECT = LINKER.downcallHandle(
                 LIBC.find("connect").orElseThrow(),
                 FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT)
+            );
+
+            FCNTL = LINKER.downcallHandle(
+                LIBC.find("fcntl").orElseThrow(),
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT)
+            );
+
+            SOCKETPAIR = LINKER.downcallHandle(
+                LIBC.find("socketpair").orElseThrow(),
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.ADDRESS)
             );
             
             HTONS = LINKER.downcallHandle(
@@ -125,6 +146,10 @@ public class IoUring implements Closeable {
      */
     private final MemorySegment sqKRay;
     /**
+     * SQ 环的状态标志（Flags）。
+     */
+    private final MemorySegment sqKFlags;
+    /**
      * SQ 环的总容量。
      */
     private final int sqRingEntries;
@@ -160,6 +185,16 @@ public class IoUring implements Closeable {
     private final int cqRingEntries;
     
     /**
+     * io_uring 实例的标志位。
+     */
+    private final int flags;
+
+    /**
+     * 内核支持的特性。
+     */
+    private final int features;
+    
+    /**
      * 预切分的 SQE 段，避免在热路径中使用 {@code asSlice()} 导致堆分配。
      */
     private final MemorySegment[] sqeSegments;
@@ -176,10 +211,23 @@ public class IoUring implements Closeable {
      * @throws IOException 如果初始化或内存映射失败。
      */
     public IoUring(int entries) throws IOException {
+        this(entries, 0);
+    }
+
+    /**
+     * 创建具有指定标志的 io_uring 实例。
+     *
+     * @param entries 提交队列中的条目数。
+     * @param flags   要传递给 {@code io_uring_setup} 的标志（如 IORING_SETUP_SQPOLL）。
+     * @throws IOException 如果初始化或内存映射失败。
+     */
+    public IoUring(int entries, int flags) throws IOException {
         this.arena = Arena.ofShared();
         
         // 1. 调用 io_uring_setup
         MemorySegment params = arena.allocate(IO_URING_PARAMS_LAYOUT);
+        params.set(ValueLayout.JAVA_INT, IO_URING_PARAMS_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("flags")), flags);
+        
         int ret;
         try {
             ret = (int) IO_URING_SETUP.invokeExact(entries, params);
@@ -191,6 +239,8 @@ public class IoUring implements Closeable {
             throw new IOException("io_uring_setup failed with error: " + ret);
         }
         this.ringFd = ret;
+        this.flags = params.get(ValueLayout.JAVA_INT, IO_URING_PARAMS_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("flags")));
+        this.features = params.get(ValueLayout.JAVA_INT, IO_URING_PARAMS_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("features")));
 
         // 2. Mmap SQ_RING
         long sqRingSize = (long) params.get(ValueLayout.JAVA_INT, IO_URING_PARAMS_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("sq_off"), MemoryLayout.PathElement.groupElement("array"))) 
@@ -260,11 +310,13 @@ public class IoUring implements Closeable {
         long sqTailOff = params.get(ValueLayout.JAVA_INT, IO_URING_PARAMS_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("sq_off"), MemoryLayout.PathElement.groupElement("tail")));
         long sqMaskOff = params.get(ValueLayout.JAVA_INT, IO_URING_PARAMS_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("sq_off"), MemoryLayout.PathElement.groupElement("ring_mask")));
         long sqArrayOff = params.get(ValueLayout.JAVA_INT, IO_URING_PARAMS_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("sq_off"), MemoryLayout.PathElement.groupElement("array")));
+        long sqFlagsOff = params.get(ValueLayout.JAVA_INT, IO_URING_PARAMS_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("sq_off"), MemoryLayout.PathElement.groupElement("flags")));
         
         this.sqKHead = sqRing.asSlice(sqHeadOff, 4);
         this.sqKTail = sqRing.asSlice(sqTailOff, 4);
         this.sqKRingMask = sqRing.asSlice(sqMaskOff, 4);
         this.sqKRay = sqRing.asSlice(sqArrayOff, (long) sqRingEntries * 4);
+        this.sqKFlags = sqRing.asSlice(sqFlagsOff, 4);
 
         // CQ
         this.cqRingEntries = params.get(ValueLayout.JAVA_INT, IO_URING_PARAMS_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("cq_entries")));
@@ -358,6 +410,25 @@ public class IoUring implements Closeable {
     }
 
     /**
+     * 准备一个 SEND_ZC (零拷贝发送) 操作。
+     *
+     * @param sqe      要填充的 SQE。
+     * @param fd       套接字文件描述符。
+     * @param buf      包含要发送数据的缓冲区。
+     * @param len      数据长度。
+     * @param flags    操作标志。
+     * @param bufIndex 预注册缓冲区的索引（如果使用了 IORING_RECVSEND_FIXED_BUF）。
+     */
+    public void prepSendZc(MemorySegment sqe, int fd, MemorySegment buf, int len, int flags, int bufIndex) {
+        sqe.set(ValueLayout.JAVA_BYTE, SQE_OFF_OPCODE, IORING_OP_SEND_ZC);
+        sqe.set(ValueLayout.JAVA_INT, SQE_OFF_FD, fd);
+        sqe.set(ValueLayout.JAVA_LONG, SQE_OFF_ADDR, buf.address());
+        sqe.set(ValueLayout.JAVA_INT, SQE_OFF_LEN, len);
+        sqe.set(ValueLayout.JAVA_INT, SQE_OFF_RW_FLAGS, flags);
+        sqe.set(ValueLayout.JAVA_SHORT, SQE_LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("buf_index")), (short) bufIndex);
+    }
+
+    /**
      * 准备一个 READ 操作。
      *
      * @param sqe    要填充的 SQE。
@@ -387,17 +458,62 @@ public class IoUring implements Closeable {
         if (submitted > 0) {
             VH_INT.setRelease(sqKTail, 0L, tail); 
             
-            try {
-                int ret = (int) IO_URING_ENTER.invokeExact(ringFd, submitted, 0, 0, MemorySegment.NULL);
-                if (ret < 0) {
-                    throw new IOException("io_uring_enter failed: " + ret);
+            // 优化：如果开启了 SQPOLL，且内核线程尚未进入休眠状态（NEED_WAKEUP 指标为 0），
+            // 则无需执行任何系统调用。
+            boolean needEnter = true;
+            int enterFlags = 0;
+            if ((flags & IORING_SETUP_SQPOLL) != 0) {
+                int sqFlags = (int) VH_INT.getAcquire(sqKFlags, 0L);
+                if ((sqFlags & IORING_SQ_NEED_WAKEUP) == 0) {
+                    needEnter = false;
+                } else {
+                    enterFlags |= IORING_ENTER_SQ_WAKEUP;
                 }
-                return ret;
-            } catch (Throwable e) {
-                throw new IOException("io_uring_enter failed", e);
             }
+
+            if (needEnter) {
+                try {
+                    int ret = (int) IO_URING_ENTER.invokeExact(ringFd, submitted, 0, enterFlags, MemorySegment.NULL);
+                    if (ret < 0) {
+                        throw new IOException("io_uring_enter failed: " + ret);
+                    }
+                    return ret;
+                } catch (Throwable e) {
+                    throw new IOException("io_uring_enter failed", e);
+                }
+            }
+            return submitted;
         }
         return 0;
+    }
+
+    /**
+     * 将一组缓冲区预注册给内核以加速 I/O 操作 (Zero-Copy)。
+     *
+     * @param segments 要注册的内存段。
+     * @throws IOException 如果注册失败。
+     */
+    public void registerBuffers(MemorySegment... segments) throws IOException {
+        int nr = segments.length;
+        MemorySegment iovecs = arena.allocate(MemoryLayout.sequenceLayout(nr, MemoryLayout.structLayout(
+            ValueLayout.ADDRESS.withName("iov_base"),
+            ValueLayout.JAVA_LONG.withName("iov_len")
+        )));
+
+        for (int i = 0; i < nr; i++) {
+            long offset = i * (ValueLayout.ADDRESS.byteSize() + ValueLayout.JAVA_LONG.byteSize());
+            iovecs.set(ValueLayout.ADDRESS, offset, segments[i]);
+            iovecs.set(ValueLayout.JAVA_LONG, offset + ValueLayout.ADDRESS.byteSize(), segments[i].byteSize());
+        }
+
+        try {
+            int ret = (int) IO_URING_REGISTER.invokeExact(ringFd, IORING_REGISTER_BUFFERS, iovecs, nr);
+            if (ret < 0) {
+                throw new IOException("io_uring_register(BUFFERS) failed: " + ret);
+            }
+        } catch (Throwable e) {
+            throw new IOException("io_uring_register failed", e);
+        }
     }
     
     /**
@@ -433,6 +549,30 @@ public class IoUring implements Closeable {
         // 推进 head
         VH_INT.setRelease(cqKHead, 0L, head + 1);
         
+        return res;
+    }
+
+    /**
+     * 非阻塞地检查是否有完成条目。
+     *
+     * @return 如果有完成条目则返回结果，否则返回 {@code Integer.MIN_VALUE}。
+     */
+    public int peekComplete() {
+        int head = (int) VH_INT.getAcquire(cqKHead, 0L);
+        int tail = (int) VH_INT.getAcquire(cqKTail, 0L);
+        int ringMask = (int) VH_INT.getAcquire(cqKRingMask, 0L);
+
+        if (head == tail) {
+            return Integer.MIN_VALUE;
+        }
+
+        int index = head & ringMask;
+        MemorySegment cqe = cqeSegments[index];
+        int res = cqe.get(ValueLayout.JAVA_INT, CQE_OFF_RES);
+
+        // 推进 head
+        VH_INT.setRelease(cqKHead, 0L, head + 1);
+
         return res;
     }
 
@@ -522,6 +662,39 @@ public class IoUring implements Closeable {
             CLOSE.invokeExact(fd);
         } catch (Throwable e) {
             // ignore
+        }
+    }
+
+    /**
+     * 创建一对相互连接的无名套接字。
+     *
+     * @param domain   协议族。
+     * @param type     套接字类型。
+     * @param protocol 协议。
+     * @param sv       用于存储两个文件描述符的内存段（需 8 字节）。
+     * @return 成功返回 0，失败返回负数错误代码。
+     */
+    public int socketpair(int domain, int type, int protocol, MemorySegment sv) {
+        try {
+            return (int) SOCKETPAIR.invokeExact(domain, type, protocol, sv);
+        } catch (Throwable e) {
+            return -1;
+        }
+    }
+
+    /**
+     * 设置文件描述符标志。
+     *
+     * @param fd    文件描述符。
+     * @param cmd   命令（如 F_SETFL）。
+     * @param flags 标志（如 O_NONBLOCK）。
+     * @return 成功返回 0，失败返回 -1。
+     */
+    public int fcntl(int fd, int cmd, int flags) {
+        try {
+            return (int) FCNTL.invokeExact(fd, cmd, flags);
+        } catch (Throwable e) {
+            return -1;
         }
     }
 

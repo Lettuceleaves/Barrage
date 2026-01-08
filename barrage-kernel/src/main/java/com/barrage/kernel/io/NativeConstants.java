@@ -46,6 +46,8 @@ public class NativeConstants {
     public static final byte IORING_OP_RECV = 27;
     public static final byte IORING_OP_OPENAT2 = 28;
     public static final byte IORING_OP_EPOLL_CTL = 29;
+    public static final byte IORING_OP_SEND_ZC = 45;
+    public static final byte IORING_OP_RECV_ZC = 50;
 
     /**
      * io_uring 结构的内存布局。
@@ -155,6 +157,38 @@ public class NativeConstants {
         SQ_RING_OFFSETS_LAYOUT.withName("sq_off"),
         CQ_RING_OFFSETS_LAYOUT.withName("cq_off")
     );
+
+    public static final int IORING_SETUP_SQPOLL = 1 << 1;    // 2
+    public static final int IORING_SETUP_SQ_AFF = 1 << 2;    // 4
+    public static final int IORING_SETUP_CQSIZE = 1 << 3;    // 8
+    public static final int IORING_SETUP_CLAMP = 1 << 4;     // 16
+    public static final int IORING_SETUP_ATTACH_WQ = 1 << 5; // 32
+    public static final int IORING_SETUP_R_DISABLED = 1 << 6; // 64
+
+    /**
+     * io_uring_register opcodes.
+     */
+    public static final int IORING_REGISTER_BUFFERS = 0;
+    public static final int IORING_UNREGISTER_BUFFERS = 1;
+    
+    /**
+     * SQ ring flags.
+     */
+    public static final int IORING_SQ_NEED_WAKEUP = 1 << 0;
+
+    /**
+     * io_uring_enter flags.
+     */
+    public static final int IORING_ENTER_GETEVENTS = 1 << 0;
+    public static final int IORING_ENTER_SQ_WAKEUP = 1 << 1;
+    public static final int IORING_ENTER_SQ_WAIT = 1 << 2;
+    public static final int IORING_ENTER_EXT_ARG = 1 << 3;
+    public static final int IORING_ENTER_REGISTERED_RING = 1 << 4;
+
+    /**
+     * Send/Recv flags.
+     */
+    public static final int IORING_RECVSEND_FIXED_BUF = 1 << 0;
     
     /**
      * {@code mmap} 的内存保护和映射常量。
@@ -171,9 +205,15 @@ public class NativeConstants {
      * 套接字族和协议常量。
      */
     // Socket constants
+    public static final int AF_UNIX = 1;
     public static final int AF_INET = 2;
     public static final int SOCK_STREAM = 1;
     public static final int IPPROTO_TCP = 6;
+    
+    // fcntl
+    public static final int F_GETFL = 3;
+    public static final int F_SETFL = 4;
+    public static final int O_NONBLOCK = 04000;
     
     /**
      * IPv4 地址的 {@code sockaddr_in} 结构布局。
