@@ -19,7 +19,7 @@
         </dependency>
         <dependency>
             <groupId>com.barrage</groupId>
-            <artifactId>barrage-protocol-http</artifactId>
+            <artifactId>barrage-protocol</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>

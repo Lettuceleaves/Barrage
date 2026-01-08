@@ -14,7 +14,7 @@
         <module>barrage-kernel</module>
         <module>barrage-buffers</module>
         <module>barrage-engine</module>
-        <module>barrage-protocol-http</module>
+        <module>barrage-protocol</module>
         <module>barrage-cli</module>
     </modules>
 
