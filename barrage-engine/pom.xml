@@ -14,17 +14,12 @@
     <dependencies>
         <dependency>
             <groupId>com.barrage</groupId>
-            <artifactId>barrage-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.barrage</groupId>
-            <artifactId>barrage-buffers</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.barrage</groupId>
             <artifactId>barrage-kernel</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.barrage</groupId>
+            <artifactId>barrage-protocol</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>

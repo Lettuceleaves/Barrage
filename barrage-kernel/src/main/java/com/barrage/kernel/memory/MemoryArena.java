@@ -3,240 +3,191 @@ package com.barrage.kernel.memory;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.util.ArrayList;
-import java.util.List;
+import static com.barrage.kernel.config.GlobalConfig.READ_SZ;
 
 /**
- * 内存区域 (Arena) 管理器。
+ * 基于 FFM API 的高性能定长内存池管理器 (Slab Allocator)。
  * <p>
- * 封装了 JDK 25 的 {@link Arena} API，以提供堆外内存的分配和管理。
- * 默认实现基于 Thread-Confined Arena（线程受限），非常适合 Thread-per-Core 架构，
- * 因为它避免了多线程竞争开销。
+ * 该类是为了满足 "Zero-GC" 和 "Cache Locality" (缓存局部性) 需求而设计的。
+ * 它在堆外内存中申请一块连续的大内存块 (Slab)，并将其逻辑划分为多个固定大小的 Slot。
  * </p>
- * <p>
- * 此类还支持 Bump-Pointer（碰撞指针）分配策略，通过预先分配后端存储并执行原始指针运算，
- * 实现零堆分配 (Zero-GC)。
- * </p>
+ * <h2>内存布局 (Slot Layout)</h2>
+ * 每个 Slot 包含头部元数据和数据缓冲区，紧凑排列以减少 CPU 缓存未命中：
+ * <pre>{@code
+ * |<--- 4B --->|<--- 4B --->|<------- READ_SZ (e.g. 1KB) ------->|
+ * +------------+------------+------------------------------------+
+ * |     FD     |    TYPE    |          DATA BUFFER               |
+ * +------------+------------+------------------------------------+
+ * ^ Offset 0   ^ Offset 4   ^ Offset 8
+ * }</pre>
+ *
+ * <h2>核心特性：</h2>
+ * <ul>
+ * <li><b>O(1) 分配与释放：</b> 使用简单的 int 数组模拟栈结构管理空闲索引，无扫描开销。</li>
+ * <li><b>Zero-GC：</b> 所有的 {@link MemorySegment} 切片对象在构造时预先创建并缓存。
+ * 在高频 IO 读写过程中，不会创建任何新的 Java 对象。</li>
+ * <li><b>非线程安全：</b> 专为 Thread-Per-Core 模型设计，每个 Worker 线程拥有独立的 Arena 实例，无需加锁。</li>
+ * </ul>
+ *
+ * @author LettuceLeaves
+ * @version 1.0
+ * @since 2026/1/10
  */
-public class MemoryArena implements AutoCloseable, DirectHeap {
+public class MemoryArena {
 
-    private final Arena arena;
-    private boolean trackSegments = true;
+    // --- 内存偏移量常量 ---
+    /** 文件描述符 (FD) 的偏移量：0 */
+    private static final long OFF_FD = 0;
+    /** 事件类型 (TYPE) 的偏移量：4 */
+    private static final long OFF_TYPE = 4;
+    /** 数据缓冲区 (BUFFER) 的起始偏移量：8 */
+    private static final long OFF_BUFFER = 8;
+    /** 单个 Slot 的总字节大小 */
+    private static final long SLOT_SIZE = 4 + 4 + READ_SZ;
 
-    /**
-     * 使用标准 {@code Arena.allocate()} 方法分配的内存段列表。
-     * 如果启用了 {@code trackSegments}，则用于手动释放追踪。
+    /** * 核心内存块 (Slab)。
+     * 所有的 Slot 都位于这块连续的堆外内存上。
      */
-    private final List<MemorySegment> allocatedSegments = new ArrayList<>();
-    
-    /**
-     * 当前已分配字节总数的累加器。
-     */
-    private long totalAllocated = 0L;
-    
-    /**
-     * 可配置的总内存分配最大限制。
-     */
-    private long maxTotalSize = Long.MAX_VALUE;
+    private final MemorySegment slab;
 
     /**
-     * 用于 Bump-Pointer (Zero-GC) 分配的后端存储。
+     * 预分配的 Buffer 切片缓存。
+     * <p>
+     * 为了避免在 {@link #getBuffer(int)} 时重复调用 {@link MemorySegment#asSlice} (这会产生新的 Java 对象)，
+     * 我们在初始化阶段就将所有 Slot 的 Buffer 部分切分好并存储在此数组中。
      */
-    private MemorySegment backingStore;
-    
-    /**
-     * 后端存储中的当前写入偏移量。
+    private final MemorySegment[] cachedBuffers;
+
+    /** * 基于数组实现的空闲索引栈。
+     * 存储当前可用的 Slot 索引。
      */
-    private long currentOffset = 0L;
+    private final int[] freeIndices;
+
+    /** 栈顶指针，指向 freeIndices 中下一个可用位置 */
+    private int top;
 
     /**
-     * 使用标准的局域 Arena 创建一个新的 MemoryArena。
-     */
-    public MemoryArena() {
-        this.arena = Arena.ofConfined();
-    }
-
-    /**
-     * 创建一个新的 MemoryArena 并预分配用于 Zero-GC 分配的后端存储。
+     * 构造并初始化内存池。
      *
-     * @param maxTotalSize 后端存储的大小（字节）。
+     * @param arena    用于分配堆外内存的范围作用域 (Scope)
+     * @param capacity 内存池容量 (Slot 数量)
      */
-    public MemoryArena(long maxTotalSize) {
-        this.arena = Arena.ofConfined();
-        this.maxTotalSize = maxTotalSize;
-        // 如果已知大小，则预分配 Zero-GC 后端存储
-        if (maxTotalSize > 0 && maxTotalSize < Long.MAX_VALUE) {
-            this.backingStore = arena.allocate(maxTotalSize);
+    public MemoryArena(Arena arena, int capacity) {
+        long totalSize = capacity * SLOT_SIZE;
+        // 分配连续的大内存块
+        // 128字节对齐：为了适配常见的 CPU Cache Line (通常 64 字节)，防止伪共享并优化预取
+        this.slab = arena.allocate(totalSize, 128);
+
+        this.freeIndices = new int[capacity];
+        this.cachedBuffers = new MemorySegment[capacity];
+
+        // 预热：初始化空闲栈并预先切片
+        for (int i = 0; i < capacity; i++) {
+            freeIndices[i] = i; // 初始状态所有索引皆空闲
+
+            // 预先创建好 buffer 部分的 slice，供 io_uring read/write 使用
+            // 这个 slice 对象会被 JVM 堆缓存，生命周期内一直复用，实现 Zero-GC
+            this.cachedBuffers[i] = slab.asSlice(i * SLOT_SIZE + OFF_BUFFER, READ_SZ);
         }
+        this.top = capacity;
     }
 
     /**
-     * 启用或禁用在列表中追踪单个内存段。
-     * 禁用追踪可减少高频分配期间的堆开销。
+     * 分配一个空闲 Slot。
      *
-     * @param trackSegments {@code true} 表示启用追踪，{@code false} 表示禁用。
+     * @return 分配到的 Slot 索引 (0 ~ capacity-1)
+     * @throws RuntimeException 如果内存池已耗尽 (OOM)
      */
-    public void setTrackSegments(boolean trackSegments) {
-        this.trackSegments = trackSegments;
+    public int allocate() {
+        if (top == 0) throw new RuntimeException("MemoryArena OOM: No free slots");
+        return freeIndices[--top];
     }
 
     /**
-     * 分配指定大小的内存段。
-     * 如果存在后端存储，则使用 Bump-Pointer 策略。
+     * 释放一个 Slot，将其归还给内存池。
      *
-     * @param byteSize 内存段的大小（字节）。
-     * @return 已分配的 {@link MemorySegment}。
+     * @param index 要释放的 Slot 索引
      */
-    public MemorySegment allocate(long byteSize) {
-        if (totalAllocated + byteSize > maxTotalSize) {
-            throw new IllegalStateException("Allocation exceeds max total size");
-        }
-        
-        MemorySegment segment;
-        if (backingStore != null) {
-            segment = backingStore.asSlice(currentOffset, byteSize);
-            currentOffset += byteSize;
-        } else {
-            segment = arena.allocate(byteSize);
-        }
-
-        if (trackSegments) {
-            allocatedSegments.add(segment);
-        }
-        totalAllocated += byteSize;
-        return segment;
+    public void free(int index) {
+        // 简单防溢出检查，高性能场景下通常假设调用者逻辑正确以省略此判断
+        if (top == freeIndices.length) return;
+        freeIndices[top++] = index;
     }
 
     /**
-     * 分配内存并返回原始地址。
-     * 这是使用后端存储时实现 Zero-GC 性能的主要方式。
+     * 获取指定索引对应的、用于 IO 操作的数据缓冲区切片。
+     * <p>
+     * 直接返回预缓存的 {@link MemorySegment} 对象，无对象分配开销。
      *
-     * @param byteSize 要分配的内存大小（字节）。
-     * @return 原始内存地址。
+     * @param index Slot 索引
+     * @return 能够直接传递给 io_uring 的 MemorySegment
      */
-    @Override
-    public long allocateAddress(long byteSize) {
-        if (totalAllocated + byteSize > maxTotalSize) {
-            throw new IllegalStateException("Allocation exceeds max total size");
-        }
-        
-        if (backingStore != null) {
-            long addr = backingStore.address() + currentOffset;
-            currentOffset += byteSize;
-            totalAllocated += byteSize;
-            return addr;
-        }
-
-        // 回退到段分配（会在堆上分配 MemorySegment 对象）
-        MemorySegment segment = arena.allocate(byteSize);
-        totalAllocated += byteSize;
-        return segment.address();
+    public MemorySegment getBuffer(int index) {
+        return cachedBuffers[index];
     }
 
+    // --- 字段访问封装 (替代原先的 slab.set/get) ---
+
     /**
-     * 分配具有特定对齐方式的内存。
+     * 同时写入事件类型和关联的文件描述符。
+     * <p>
+     * 通常在提交 SQE 之前调用，用于保存上下文信息，以便在 CQE 返回时恢复状态。
      *
-     * @param byteSize      内存段的大小（字节）。
-     * @param byteAlignment 字节对齐（必须是 2 的幂）。
-     * @return 已分配的 {@link MemorySegment}。
+     * @param index Slot 索引
+     * @param type  事件类型 (如 READ, WRITE, ACCEPT)
+     * @param fd    关联的文件描述符
      */
-    public MemorySegment allocate(long byteSize, long byteAlignment) {
-        if (totalAllocated + byteSize > maxTotalSize) {
-            throw new IllegalStateException("Allocation exceeds max total size");
-        }
-        MemorySegment segment = arena.allocate(byteSize, byteAlignment);
-        allocatedSegments.add(segment);
-        totalAllocated += byteSize;
-        return segment;
+    public void setEventInfo(int index, int type, int fd) {
+        long offset = index * SLOT_SIZE;
+        slab.set(ValueLayout.JAVA_INT, offset + OFF_TYPE, type);
+        slab.set(ValueLayout.JAVA_INT, offset + OFF_FD, fd);
     }
-    
+
     /**
-     * 为 {@code int} 分配空间并初始化。
+     * 仅写入文件描述符。
+     * <p>
+     * 通常用于连接建立阶段，或初始化 Slot 时。
      *
-     * @param value 初始值。
-     * @return 指向已分配整数的 {@link MemorySegment}。
+     * @param index Slot 索引
+     * @param fd    文件描述符
      */
-    public MemorySegment allocateInt(int value) {
-        MemorySegment segment = arena.allocate(ValueLayout.JAVA_INT);
-        segment.set(ValueLayout.JAVA_INT, 0, value);
-        if (trackSegments) {
-            allocatedSegments.add(segment);
-        }
-        totalAllocated += ValueLayout.JAVA_INT.byteSize();
-        return segment;
+    public void setFd(int index, int fd) {
+        long offset = index * SLOT_SIZE;
+        slab.set(ValueLayout.JAVA_INT, offset + OFF_FD, fd);
     }
 
     /**
-     * 关闭 Arena 并释放所有关联的堆外内存。
-     * 从此 Arena 衍生的任何段都将失效。
-     */
-    @Override
-    public void close() {
-        allocatedSegments.clear();
-        totalAllocated = 0L;
-        arena.close();
-    }
-    
-    /**
-     * 返回底层的 JDK {@link Arena}。
-     * 谨慎使用，因为直接访问会绕过追踪和安全检查。
+     * 仅写入事件类型。
+     * <p>
+     * 用于状态机流转，例如从 WRITE 状态切换到 READ 状态。
      *
-     * @return 原始 {@link Arena} 实例。
+     * @param index Slot 索引
+     * @param type  新的事件类型
      */
-    public Arena raw() {
-        return arena;
+    public void setType(int index, int type) {
+        long offset = index * SLOT_SIZE;
+        slab.set(ValueLayout.JAVA_INT, offset + OFF_TYPE, type);
     }
 
     /**
-     * 释放一个内存段。如果启用了追踪，则将其从内部列表中移除。
+     * 读取 Slot 中保存的文件描述符。
      *
-     * @param segment 要释放的内存段。
+     * @param index Slot 索引
+     * @return fd
      */
-    @Override
-    public void free(MemorySegment segment) {
-        if (trackSegments) {
-            allocatedSegments.remove(segment);
-        }
+    public int getFd(int index) {
+        long offset = index * SLOT_SIZE;
+        return slab.get(ValueLayout.JAVA_INT, offset + OFF_FD);
     }
 
     /**
-     * 分配多个相同大小的块。
+     * 读取 Slot 中保存的事件类型。
      *
-     * @param blockSize  每个块的大小（字节）。
-     * @param blockCount 要分配的块数。
-     * @return {@link MemorySegment} 列表。
+     * @param index Slot 索引
+     * @return type
      */
-    @Override
-    public List<MemorySegment> allocateBlocks(long blockSize, int blockCount) {
-        long required = blockSize * blockCount;
-        if (totalAllocated + required > maxTotalSize) {
-            throw new IllegalStateException("Allocation exceeds max total size");
-        }
-        List<MemorySegment> blocks = new ArrayList<>();
-        for (int i = 0; i < blockCount; i++) {
-            MemorySegment seg = allocate(blockSize);
-            blocks.add(seg);
-        }
-        return blocks;
-    }
-
-    @Override
-    public long getTotalAllocated() {
-        return totalAllocated;
-    }
-
-    @Override
-    public void setMaxTotalSize(long maxTotalSize) {
-        this.maxTotalSize = maxTotalSize;
-    }
-
-    @Override
-    public void free(List<MemorySegment> segments) {
-        if (segments == null) {
-            return;
-        }
-        for (MemorySegment segment : segments) {
-            free(segment);
-        }
+    public int getType(int index) {
+        long offset = index * SLOT_SIZE;
+        return slab.get(ValueLayout.JAVA_INT, offset + OFF_TYPE);
     }
 }
