@@ -23,7 +23,7 @@ import java.lang.invoke.VarHandle;
  * @since 2026/1/10
  * @see <a href="https://man7.org/linux/man-pages/man7/socket.7.html">Linux Socket Man Page</a>
  */
-public class NativeSocket implements AutoCloseable {
+public final class NativeSocket implements AutoCloseable {
 
     private final int fd;
 
@@ -180,7 +180,7 @@ public class NativeSocket implements AutoCloseable {
             }catch(Throwable t){ return -1; }
         }
 
-        static void close(int f) { try{int r=(int)CLOSE.invokeExact(f);}catch(Throwable e){} }
+        static void close(int f) { try{CLOSE.invokeExact(f);}catch(Throwable e){} }
 
         static void bindOrThrow(int f, MemorySegment a, int l) throws IOException {
             try(Arena z=Arena.ofConfined()){

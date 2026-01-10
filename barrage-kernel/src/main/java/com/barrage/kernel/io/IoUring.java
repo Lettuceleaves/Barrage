@@ -1,5 +1,7 @@
 package com.barrage.kernel.io;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.VarHandle;
@@ -32,7 +34,7 @@ import static com.barrage.kernel.io.NativeConstants.*;
  * @since 2026/1/10
  * @see <a href="https://kernel.dk/io_uring.pdf">io_uring 设计论文</a>
  */
-public class IoUring implements Closeable {
+public final class IoUring implements Closeable {
 
     /**
      * 完成队列条目 (Completion Queue Entry) 的轻量级载体。
@@ -41,8 +43,10 @@ public class IoUring implements Closeable {
      */
     public static class Cqe {
         /** 操作结果，>=0 表示成功字节数，<0 表示错误码 (errno 的负值) */
+        @SuppressFBWarnings(value = "URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD", justification = "Consumed by external user code")
         public int res;
         /** 用户数据，通常用于存储回调上下文索引或指针 */
+        @SuppressFBWarnings(value = "URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD", justification = "Consumed by external user code")
         public long userData;
     }
 
@@ -325,7 +329,7 @@ public class IoUring implements Closeable {
      */
     @Override
     public void close() throws IOException {
-        try { int r = (int) CLOSE.invokeExact(ringFd); } catch(Throwable e) {}
+        try { CLOSE.invokeExact(ringFd); } catch(Throwable e) {}
         // 关闭 Arena 会自动 unmap 内存
         arena.close();
     }

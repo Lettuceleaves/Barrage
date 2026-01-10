@@ -5,6 +5,7 @@ import com.barrage.kernel.io.NativeConstants;
 import com.barrage.kernel.io.NativeSocket;
 import com.barrage.kernel.memory.MemoryArena;
 import com.barrage.protocol.HTTP.HttpMessage;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 import java.io.IOException;
 import java.lang.foreign.Arena;
@@ -46,6 +47,7 @@ public class ClientEngine {
      * @param threads    并发线程数（建议与 CPU 核心数相当）
      * @param qpsCounter 全局 QPS 计数器，所有 Worker 将向此计数器汇报成功请求
      */
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Intentional shared mutable state for metrics aggregation")
     public ClientEngine(String targetIp, int targetPort, int threads, LongAdder qpsCounter) {
         this.targetIp = targetIp;
         this.targetPort = targetPort;

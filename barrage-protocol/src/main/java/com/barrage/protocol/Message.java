@@ -1,5 +1,7 @@
 package com.barrage.protocol;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 import java.lang.foreign.MemorySegment;
 
 /**
@@ -41,6 +43,7 @@ public abstract class Message {
      *
      * @return 原生内存段
      */
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = "Intentional Zero-Copy exposure. Immutability is handled by the caller (e.g. asReadOnly).")
     public MemorySegment segment() {
         return segment;
     }
