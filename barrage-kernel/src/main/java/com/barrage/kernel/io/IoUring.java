@@ -241,6 +241,19 @@ public final class IoUring implements Closeable {
     }
 
     /**
+     * [新增] 提交待处理任务到内核，但不等待。
+     * <p>
+     * 等价于调用 {@code submitAndWait(0)}。
+     * 当提交队列满时，调用此方法将任务刷入内核，从而腾出 SQE 槽位。
+     *
+     * @return 提交的任务数量
+     * @throws IOException 如果系统调用失败
+     */
+    public int submit() throws IOException {
+        return submitAndWait(0);
+    }
+
+    /**
      * 提交待处理任务，但不等待任何结果。
      * 等价于 {@code submitAndWait(0)}。
      *

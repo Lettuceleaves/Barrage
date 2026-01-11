@@ -1,13 +1,5 @@
-GET /api/v1/status HTTP/1.1
-Host: localhost:8080
-User-Agent: Barrage/1.0
-Accept: application/json
+HTTP/1.1 200 OK
+Content-Type: application/octet-stream
+Content-Length: 1048576
+Connection: keep-alive
 
-###
-
-POST /api/v1/login HTTP/1.1
-Host: localhost:8080
-Content-Type: application/json
-Content-Length: 45
-
-{"username": "testuser", "password": "password"}

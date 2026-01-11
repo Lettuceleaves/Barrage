@@ -1,0 +1,303 @@
+2026-01-10 17:26:55
+Full thread dump OpenJDK 64-Bit Server VM (25.0.1+8-jvmci-b01 mixed mode, sharing):
+
+Threads class SMR info:
+_java_thread_list=0x0000730988002280, length=22, elements={
+0x00007309d802c3b0, 0x00007309d8144540, 0x00007309d8145580, 0x00007309d8146980,
+0x00007309d81482a0, 0x00007309d8149b20, 0x00007309d814b9e0, 0x00007309d814d3d0,
+0x00007309d819aec0, 0x00007309d81b8fe0, 0x00007309d81bb2f0, 0x00007309d8261cc0,
+0x00007309d8262d80, 0x00007309d8263be0, 0x00007309d8264cf0, 0x00007309d8268230,
+0x00007309d8206800, 0x00007309d8205030, 0x00007309d82058e0, 0x00007309d826d410,
+0x00007309d826ebb0, 0x0000730988000f30
+}
+
+"main" #3 [12581] prio=5 os_prio=0 cpu=346.36ms elapsed=194.97s tid=0x00007309d802c3b0 nid=12581 in Object.wait()  [0x00007309dce92000]
+   java.lang.Thread.State: WAITING (on object monitor)
+	at java.lang.Object.wait0(java.base@25.0.1/Native Method)
+	- waiting on <0x0000000715801f28> (a java.lang.Thread)
+	at java.lang.Object.wait(java.base@25.0.1/Object.java:389)
+	at java.lang.Thread.join(java.base@25.0.1/Thread.java:1887)
+	- locked <0x0000000715801f28> (a java.lang.Thread)
+	at java.lang.Thread.join(java.base@25.0.1/Thread.java:1963)
+	at com.barrage.cli.Main.main(Main.java:91)
+
+   Locked ownable synchronizers:
+	- None
+
+"Reference Handler" #15 [12594] daemon prio=10 os_prio=0 cpu=0.28ms elapsed=194.95s tid=0x00007309d8144540 nid=12594 waiting on condition  [0x00007309b8c0b000]
+   java.lang.Thread.State: RUNNABLE
+	at java.lang.ref.Reference.waitForReferencePendingList(java.base@25.0.1/Native Method)
+	at java.lang.ref.Reference.processPendingReferences(java.base@25.0.1/Reference.java:246)
+	at java.lang.ref.Reference$ReferenceHandler.run(java.base@25.0.1/Reference.java:208)
+
+   Locked ownable synchronizers:
+	- None
+
+"Finalizer" #16 [12595] daemon prio=8 os_prio=0 cpu=0.23ms elapsed=194.95s tid=0x00007309d8145580 nid=12595 in Object.wait()  [0x00007309b8b0a000]
+   java.lang.Thread.State: WAITING (on object monitor)
+	at java.lang.Object.wait0(java.base@25.0.1/Native Method)
+	- waiting on <0x0000000715802368> (a java.lang.ref.ReferenceQueue$Lock)
+	at java.lang.Object.wait(java.base@25.0.1/Object.java:389)
+	at java.lang.Object.wait(java.base@25.0.1/Object.java:351)
+	at java.lang.ref.ReferenceQueue.remove0(java.base@25.0.1/ReferenceQueue.java:137)
+	at java.lang.ref.ReferenceQueue.remove(java.base@25.0.1/ReferenceQueue.java:215)
+	- locked <0x0000000715802368> (a java.lang.ref.ReferenceQueue$Lock)
+	at java.lang.ref.Finalizer$FinalizerThread.run(java.base@25.0.1/Finalizer.java:165)
+
+   Locked ownable synchronizers:
+	- None
+
+"Signal Dispatcher" #17 [12596] daemon prio=9 os_prio=0 cpu=0.49ms elapsed=194.95s tid=0x00007309d8146980 nid=12596 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+   Locked ownable synchronizers:
+	- None
+
+"Service Thread" #18 [12597] daemon prio=9 os_prio=0 cpu=8.10ms elapsed=194.95s tid=0x00007309d81482a0 nid=12597 runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+   Locked ownable synchronizers:
+	- None
+
+"Monitor Deflation Thread" #19 [12598] daemon prio=9 os_prio=0 cpu=27.90ms elapsed=194.94s tid=0x00007309d8149b20 nid=12598 runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+   Locked ownable synchronizers:
+	- None
+
+"JVMCI-native CompilerThread0" #20 [12599] daemon prio=9 os_prio=0 cpu=586.09ms elapsed=194.94s tid=0x00007309d814b9e0 nid=12599 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+   No compile task
+
+   Locked ownable synchronizers:
+	- None
+
+"C1 CompilerThread0" #27 [12601] daemon prio=9 os_prio=0 cpu=166.63ms elapsed=194.94s tid=0x00007309d814d3d0 nid=12601 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+   No compile task
+
+   Locked ownable synchronizers:
+	- None
+
+"Common-Cleaner" #32 [12619] daemon prio=8 os_prio=0 cpu=0.60ms elapsed=194.80s tid=0x00007309d819aec0 nid=12619 in Object.wait()  [0x00007309a95fe000]
+   java.lang.Thread.State: TIMED_WAITING (on object monitor)
+	at java.lang.Object.wait0(java.base@25.0.1/Native Method)
+	- waiting on <0x000000071574a480> (a java.lang.ref.ReferenceQueue$Lock)
+	at java.lang.Object.wait(java.base@25.0.1/Object.java:389)
+	at java.lang.ref.ReferenceQueue.remove0(java.base@25.0.1/ReferenceQueue.java:123)
+	at java.lang.ref.ReferenceQueue.remove(java.base@25.0.1/ReferenceQueue.java:201)
+	- locked <0x000000071574a480> (a java.lang.ref.ReferenceQueue$Lock)
+	at jdk.internal.ref.CleanerImpl.run(java.base@25.0.1/CleanerImpl.java:146)
+	at java.lang.Thread.runWith(java.base@25.0.1/Thread.java:1487)
+	at java.lang.Thread.run(java.base@25.0.1/Thread.java:1474)
+	at jdk.internal.misc.InnocuousThread.run(java.base@25.0.1/InnocuousThread.java:148)
+
+   Locked ownable synchronizers:
+	- None
+
+"Monitor Ctrl-Break" #33 [12630] daemon prio=5 os_prio=0 cpu=22.88ms elapsed=194.73s tid=0x00007309d81b8fe0 nid=12630 runnable  [0x00007309a94fe000]
+   java.lang.Thread.State: RUNNABLE
+	at sun.nio.ch.SocketDispatcher.read0(java.base@25.0.1/Native Method)
+	at sun.nio.ch.SocketDispatcher.read(java.base@25.0.1/SocketDispatcher.java:48)
+	at sun.nio.ch.NioSocketImpl.tryRead(java.base@25.0.1/NioSocketImpl.java:255)
+	at sun.nio.ch.NioSocketImpl.implRead(java.base@25.0.1/NioSocketImpl.java:305)
+	at sun.nio.ch.NioSocketImpl.read(java.base@25.0.1/NioSocketImpl.java:354)
+	at sun.nio.ch.NioSocketImpl$1.read(java.base@25.0.1/NioSocketImpl.java:798)
+	at java.net.Socket$SocketInputStream.implRead(java.base@25.0.1/Socket.java:974)
+	at java.net.Socket$SocketInputStream.read(java.base@25.0.1/Socket.java:964)
+	at sun.nio.cs.StreamDecoder.readBytes(java.base@25.0.1/StreamDecoder.java:279)
+	at sun.nio.cs.StreamDecoder.implRead(java.base@25.0.1/StreamDecoder.java:322)
+	at sun.nio.cs.StreamDecoder.read(java.base@25.0.1/StreamDecoder.java:186)
+	- locked <0x0000000715417ed8> (a java.io.InputStreamReader)
+	at java.io.InputStreamReader.read(java.base@25.0.1/InputStreamReader.java:183)
+	at java.io.BufferedReader.fill(java.base@25.0.1/BufferedReader.java:166)
+	at java.io.BufferedReader.readLine(java.base@25.0.1/BufferedReader.java:333)
+	- locked <0x0000000715417ed8> (a java.io.InputStreamReader)
+	at java.io.BufferedReader.readLine(java.base@25.0.1/BufferedReader.java:400)
+	at com.intellij.rt.execution.application.AppMainV2$1.run(AppMainV2.java:31)
+
+   Locked ownable synchronizers:
+	- <0x00000007157f6ac0> (a java.util.concurrent.locks.ReentrantLock$NonfairSync)
+
+"Notification Thread" #34 [12631] daemon prio=9 os_prio=0 cpu=0.12ms elapsed=194.73s tid=0x00007309d81bb2f0 nid=12631 runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+   Locked ownable synchronizers:
+	- None
+
+"server-worker-0" #35 [12633] prio=5 os_prio=0 cpu=1348.60ms elapsed=194.32s tid=0x00007309d8261cc0 nid=12633 runnable  [0x00007309a97fe000]
+   java.lang.Thread.State: RUNNABLE
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07ac00.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f074c00.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at jdk.internal.foreign.abi.DowncallStub/0x000000001f064c00.invoke(java.base@25.0.1/Unknown Source)
+	at java.lang.invoke.LambdaForm$DMH/0x000000001f065000.invokeStatic(java.base@25.0.1/LambdaForm$DMH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07a800.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f073000.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at com.barrage.kernel.io.IoUring.submitAndWait(IoUring.java:236)
+	at com.barrage.engine.ServerEngine$ServerWorker.run(ServerEngine.java:131)
+	at java.lang.Thread.runWith(java.base@25.0.1/Thread.java:1487)
+	at java.lang.Thread.run(java.base@25.0.1/Thread.java:1474)
+
+   Locked ownable synchronizers:
+	- None
+
+"server-worker-1" #36 [12634] prio=5 os_prio=0 cpu=1182.21ms elapsed=194.32s tid=0x00007309d8262d80 nid=12634 runnable  [0x00007309a92fe000]
+   java.lang.Thread.State: RUNNABLE
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07ac00.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f074c00.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at jdk.internal.foreign.abi.DowncallStub/0x000000001f064c00.invoke(java.base@25.0.1/Unknown Source)
+	at java.lang.invoke.LambdaForm$DMH/0x000000001f065000.invokeStatic(java.base@25.0.1/LambdaForm$DMH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07a800.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f073000.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at com.barrage.kernel.io.IoUring.submitAndWait(IoUring.java:236)
+	at com.barrage.engine.ServerEngine$ServerWorker.run(ServerEngine.java:131)
+	at java.lang.Thread.runWith(java.base@25.0.1/Thread.java:1487)
+	at java.lang.Thread.run(java.base@25.0.1/Thread.java:1474)
+
+   Locked ownable synchronizers:
+	- None
+
+"server-worker-2" #37 [12635] prio=5 os_prio=0 cpu=1240.36ms elapsed=194.32s tid=0x00007309d8263be0 nid=12635 runnable  [0x00007309a91fe000]
+   java.lang.Thread.State: RUNNABLE
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07ac00.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f074c00.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at jdk.internal.foreign.abi.DowncallStub/0x000000001f064c00.invoke(java.base@25.0.1/Unknown Source)
+	at java.lang.invoke.LambdaForm$DMH/0x000000001f065000.invokeStatic(java.base@25.0.1/LambdaForm$DMH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07a800.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f073000.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at com.barrage.kernel.io.IoUring.submitAndWait(IoUring.java:236)
+	at com.barrage.engine.ServerEngine$ServerWorker.run(ServerEngine.java:131)
+	at java.lang.Thread.runWith(java.base@25.0.1/Thread.java:1487)
+	at java.lang.Thread.run(java.base@25.0.1/Thread.java:1474)
+
+   Locked ownable synchronizers:
+	- None
+
+"server-worker-3" #38 [12636] prio=5 os_prio=0 cpu=1548.12ms elapsed=194.32s tid=0x00007309d8264cf0 nid=12636 runnable  [0x00007309a90fe000]
+   java.lang.Thread.State: RUNNABLE
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07ac00.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f074c00.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at jdk.internal.foreign.abi.DowncallStub/0x000000001f064c00.invoke(java.base@25.0.1/Unknown Source)
+	at java.lang.invoke.LambdaForm$DMH/0x000000001f065000.invokeStatic(java.base@25.0.1/LambdaForm$DMH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07a800.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f073000.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at com.barrage.kernel.io.IoUring.submitAndWait(IoUring.java:236)
+	at com.barrage.engine.ServerEngine$ServerWorker.run(ServerEngine.java:131)
+	at java.lang.Thread.runWith(java.base@25.0.1/Thread.java:1487)
+	at java.lang.Thread.run(java.base@25.0.1/Thread.java:1474)
+
+   Locked ownable synchronizers:
+	- None
+
+"monitor" #39 [12652] prio=5 os_prio=0 cpu=79.01ms elapsed=192.25s tid=0x00007309d8268230 nid=12652 waiting on condition  [0x00007309a8847000]
+   java.lang.Thread.State: TIMED_WAITING (sleeping)
+	at java.lang.Thread.sleepNanos0(java.base@25.0.1/Native Method)
+	at java.lang.Thread.sleepNanos(java.base@25.0.1/Thread.java:509)
+	at java.lang.Thread.sleep(java.base@25.0.1/Thread.java:540)
+	at com.barrage.cli.Main.lambda$startMonitor$0(Main.java:112)
+	at com.barrage.cli.Main$$Lambda/0x000000001f076228.run(Unknown Source)
+	at java.lang.Thread.runWith(java.base@25.0.1/Thread.java:1487)
+	at java.lang.Thread.run(java.base@25.0.1/Thread.java:1474)
+
+   Locked ownable synchronizers:
+	- None
+
+"client-worker-0" #40 [12653] prio=5 os_prio=0 cpu=665.78ms elapsed=192.22s tid=0x00007309d8206800 nid=12653 runnable  [0x00007309a8647000]
+   java.lang.Thread.State: RUNNABLE
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07ac00.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f074c00.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at jdk.internal.foreign.abi.DowncallStub/0x000000001f064c00.invoke(java.base@25.0.1/Unknown Source)
+	at java.lang.invoke.LambdaForm$DMH/0x000000001f065000.invokeStatic(java.base@25.0.1/LambdaForm$DMH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07a800.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f073000.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at com.barrage.kernel.io.IoUring.submitAndWait(IoUring.java:236)
+	at com.barrage.engine.ClientEngine$ClientWorker.run(ClientEngine.java:136)
+	at java.lang.Thread.runWith(java.base@25.0.1/Thread.java:1487)
+	at java.lang.Thread.run(java.base@25.0.1/Thread.java:1474)
+
+   Locked ownable synchronizers:
+	- None
+
+"client-worker-1" #41 [12654] prio=5 os_prio=0 cpu=727.43ms elapsed=192.22s tid=0x00007309d8205030 nid=12654 runnable  [0x00007309a9bfe000]
+   java.lang.Thread.State: RUNNABLE
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07ac00.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f074c00.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at jdk.internal.foreign.abi.DowncallStub/0x000000001f064c00.invoke(java.base@25.0.1/Unknown Source)
+	at java.lang.invoke.LambdaForm$DMH/0x000000001f065000.invokeStatic(java.base@25.0.1/LambdaForm$DMH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07a800.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f073000.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at com.barrage.kernel.io.IoUring.submitAndWait(IoUring.java:236)
+	at com.barrage.engine.ClientEngine$ClientWorker.run(ClientEngine.java:136)
+	at java.lang.Thread.runWith(java.base@25.0.1/Thread.java:1487)
+	at java.lang.Thread.run(java.base@25.0.1/Thread.java:1474)
+
+   Locked ownable synchronizers:
+	- None
+
+"client-worker-2" #42 [12655] prio=5 os_prio=0 cpu=708.74ms elapsed=192.24s tid=0x00007309d82058e0 nid=12655 runnable  [0x00007309a99fe000]
+   java.lang.Thread.State: RUNNABLE
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07ac00.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f074c00.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at jdk.internal.foreign.abi.DowncallStub/0x000000001f064c00.invoke(java.base@25.0.1/Unknown Source)
+	at java.lang.invoke.LambdaForm$DMH/0x000000001f065000.invokeStatic(java.base@25.0.1/LambdaForm$DMH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07a800.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f073000.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at com.barrage.kernel.io.IoUring.submitAndWait(IoUring.java:236)
+	at com.barrage.engine.ClientEngine$ClientWorker.run(ClientEngine.java:136)
+	at java.lang.Thread.runWith(java.base@25.0.1/Thread.java:1487)
+	at java.lang.Thread.run(java.base@25.0.1/Thread.java:1474)
+
+   Locked ownable synchronizers:
+	- None
+
+"client-worker-3" #43 [12656] prio=5 os_prio=0 cpu=735.34ms elapsed=192.24s tid=0x00007309d826d410 nid=12656 runnable  [0x00007309a8350000]
+   java.lang.Thread.State: RUNNABLE
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07ac00.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f074c00.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at jdk.internal.foreign.abi.DowncallStub/0x000000001f064c00.invoke(java.base@25.0.1/Unknown Source)
+	at java.lang.invoke.LambdaForm$DMH/0x000000001f065000.invokeStatic(java.base@25.0.1/LambdaForm$DMH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f07a800.invoke(java.base@25.0.1/LambdaForm$MH)
+	at java.lang.invoke.LambdaForm$MH/0x000000001f073000.invokeExact_MT(java.base@25.0.1/LambdaForm$MH)
+	at com.barrage.kernel.io.IoUring.submitAndWait(IoUring.java:236)
+	at com.barrage.engine.ClientEngine$ClientWorker.run(ClientEngine.java:136)
+	at java.lang.Thread.runWith(java.base@25.0.1/Thread.java:1487)
+	at java.lang.Thread.run(java.base@25.0.1/Thread.java:1474)
+
+   Locked ownable synchronizers:
+	- None
+
+"Thread-0" #44 [12657] daemon prio=5 os_prio=0 cpu=109.97ms elapsed=192.23s tid=0x00007309d826ebb0 nid=12657 sleeping [0x0000730175afe000]
+   java.lang.Thread.State: TIMED_WAITING (sleeping)
+	at java.lang.Thread.sleepNanos0(java.base@25.0.1/Native Method)
+	at java.lang.Thread.sleepNanos(java.base@25.0.1/Thread.java:509)
+	at java.lang.Thread.sleep(java.base@25.0.1/Thread.java:540)
+	at com.barrage.cli.Main.lambda$setupGcDetector$0(Main.java:144)
+	at com.barrage.cli.Main$$Lambda/0x000000001f0768a8.run(Unknown Source)
+	at java.lang.Thread.runWith(java.base@25.0.1/Thread.java:1487)
+	at java.lang.Thread.run(java.base@25.0.1/Thread.java:1474)
+
+   Locked ownable synchronizers:
+	- None
+
+"Attach Listener" #45 [16729] daemon prio=9 os_prio=0 cpu=0.77ms elapsed=0.17s tid=0x0000730988000f30 nid=16729 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+   Locked ownable synchronizers:
+	- None
+
+"VM Thread" os_prio=0 cpu=17.09ms elapsed=194.98s tid=0x00007309d8139850 nid=12593 runnable  
+
+"VM Periodic Task Thread" os_prio=0 cpu=2.25ms elapsed=194.99s tid=0x00007309d8127520 nid=12592 waiting on condition  
+
+"G1 Service" os_prio=0 cpu=10.12ms elapsed=194.99s tid=0x00007309d8118640 nid=12586 runnable  
+
+"G1 Refine#0" os_prio=0 cpu=0.10ms elapsed=194.99s tid=0x00007309d8117450 nid=12585 runnable  
+
+"G1 Conc#0" os_prio=0 cpu=0.11ms elapsed=194.99s tid=0x00007309d80b0de0 nid=12584 runnable  
+
+"G1 Main Marker" os_prio=0 cpu=0.19ms elapsed=194.99s tid=0x00007309d80afc10 nid=12583 runnable  
+
+"GC Thread#0" os_prio=0 cpu=0.13ms elapsed=195.00s tid=0x00007309d8096c50 nid=12582 runnable  
+
+JNI global refs: 23, weak refs: 0
+

@@ -2,6 +2,9 @@ package com.barrage.cli;
 
 import com.barrage.engine.ClientEngine;
 import com.barrage.engine.ServerEngine;
+import com.barrage.protocol.HTTP.HttpMessage;
+import com.barrage.protocol.datasource.DataSource;
+import com.barrage.protocol.datasource.FileDataSource;
 
 import static com.barrage.kernel.config.GlobalConfig.*;
 
@@ -58,29 +61,32 @@ public class Main {
         System.out.println("   Config: " + SERVER_THREADS + " Server Threads, " + CLIENT_THREADS + " Client Threads");
         System.out.println("==============================================");
 
-        // 1. 启动 GC 监测 (用于验证是否真的是 Zero-GC)
-        setupGcDetector();
-
-        // 2. 启动服务端
+        // 1. 启动服务端
         // 异常直接抛出导致程序退出，因为服务器启动失败没必要继续
         // ServerEngine 通常包含 netty/io_uring 的 bootstrap 逻辑
         new ServerEngine(PORT, SERVER_THREADS).start();
 
-        // 3. 预热
+        // 2. 预热
         // 给予 JVM 足够的时间进行类加载和初步的 JIT 编译，
         // 避免在压测初期因冷启动导致的数据抖动。
         System.out.println(">>> Warming up (2 seconds)...");
         Thread.sleep(2000);
 
-        // 4. 启动监控线程
+        DataSource requestSource = new FileDataSource("tmp/http_requests.txt");
+        HttpMessage requestTemplate = HttpMessage.load(requestSource);
+
+        // 3. 启动监控线程
         startMonitor();
 
-        // 5. 启动客户端 (压测生成器)
+        // 4. 启动客户端 (压测生成器)
         System.out.println(">>> Starting Client Load Generator...");
         // ClientEngine 负责产生高并发流量，并将请求统计写入 TOTAL_QPS
-        new ClientEngine(IP, PORT, CLIENT_THREADS, TOTAL_QPS).start();
+        new ClientEngine(IP, PORT, CLIENT_THREADS, TOTAL_QPS, requestTemplate).start();
 
-        // 6. 挂起主线程
+        // 6. 启动GC监控
+        setupGcDetector();
+
+        // 7. 挂起主线程
         // 防止 main 方法退出导致 JVM 关闭。
         Thread.currentThread().join();
     }

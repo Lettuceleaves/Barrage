@@ -1,7 +1,10 @@
 package com.barrage.protocol.HTTP;
 
 import com.barrage.protocol.Message;
+import com.barrage.protocol.datasource.DataSource;
+import com.barrage.protocol.datasource.FileDataSource;
 
+import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.nio.charset.StandardCharsets;
@@ -9,33 +12,28 @@ import java.nio.charset.StandardCharsets;
 /**
  * HTTP 协议消息的静态封装与内存管理类。
  * <p>
- * 该类专为高吞吐量基准测试（Benchmarking）设计，预定义了常用的 HTTP 请求和响应报文。
- * * <h3>核心优化：Zero-Allocation (零分配)</h3>
- * 为了极致的性能，本类不使用 Java 堆内存存储报文数据，而是利用 {@link Arena#global()}
- * 将报文直接分配在<b>持久的堆外内存</b>中。
- * <ul>
- * <li><b>避免拷贝：</b> 在发送数据时，可以直接将这些 {@link MemorySegment} 传递给 {@code io_uring}，
- * 无需进行 {@code String -> byte[]} 的转换，也无需从堆内拷贝到堆外。</li>
- * <li><b>避免 GC：</b> 由于数据驻留在 Global Arena 中，生命周期与 JVM 进程一致，
- * 永远不会被垃圾回收器扫描或回收，彻底消除了压测过程中的 GC 压力。</li>
- * </ul>
+ * 该类作为 HTTP 报文的载体，深度集成 Java 外来函数与内存 API (Project Panama)。
+ * 核心设计目标是实现<strong>零拷贝 (Zero-Copy)</strong> 报文构建，通过将数据直接映射至 {@link Arena#global()}，
+ * 使得 {@code io_uring} 等底层内核接口可以直接访问用户态内存。
+ * </p>
+ * <p>
+ * <strong>内存模型：</strong> 所有通过本类生成的实例均持有堆外内存段 {@link MemorySegment}，
+ * 其生命周期通常绑定在全局域内，以减少在高频测试场景下的 GC 回收开销。
+ * </p>
  *
  * @author LettuceLeaves
- * @version 1.0
- * @since 2026/1/10
+ * @since 2026/1/11
  */
 public class HttpMessage extends Message {
 
+    // ==========================================
+    //       核心常量定义
+    // ==========================================
+
     /**
-     * 预定义的 HTTP/1.1 200 OK 响应报文。
+     * 预定义的 HTTP/1.1 200 OK 静态响应报文。
      * <p>
-     * <b>内容包含：</b>
-     * <ul>
-     * <li>Status: 200 OK</li>
-     * <li>Connection: keep-alive (复用连接)</li>
-     * <li>Body: "Hello World!\n" (13 bytes)</li>
-     * </ul>
-     * 该对象常驻堆外内存，供服务端 Worker 线程并发共享读取。
+     * 预分配在全局堆外内存中，适用于服务端在不依赖业务逻辑时的线速回显测试。
      */
     public static final HttpMessage RESPONSE_200 = new HttpMessage(
             "HTTP/1.1 200 OK\r\n" +
@@ -46,15 +44,9 @@ public class HttpMessage extends Message {
     );
 
     /**
-     * 预定义的 HTTP/1.1 GET 请求报文。
+     * 预定义的 HTTP/1.1 GET 请求报文模板。
      * <p>
-     * <b>内容包含：</b>
-     * <ul>
-     * <li>Method: GET /</li>
-     * <li>Host: localhost</li>
-     * <li>Connection: keep-alive</li>
-     * </ul>
-     * 该对象常驻堆外内存，供客户端 Generator 线程并发共享读取。
+     * 常用于客户端引擎 (ClientEngine) 发起基础连接测试或吞吐量压测。
      */
     public static final HttpMessage REQUEST_DEFAULT = new HttpMessage(
             "GET / HTTP/1.1\r\n" +
@@ -63,36 +55,150 @@ public class HttpMessage extends Message {
                     "\r\n"
     );
 
+    // ==========================================
+    //       构造函数
+    // ==========================================
+
     /**
-     * 构造一个新的 HttpMessage。
-     * <p>
-     * 注意：此构造函数会立即申请全局堆外内存。
+     * 私有构造函数，直接封装已分配的堆外内存段。
      *
-     * @param content HTTP 报文的完整字符串内容
+     * @param segment 必须是已经填充好 HTTP 报文数据的堆外内存段
+     */
+    private HttpMessage(MemorySegment segment) {
+        super(segment);
+    }
+
+    /**
+     * 公共构造函数，从字符串内容构建消息。
+     * <p>
+     * 内部会将字符串按照 US_ASCII 编码拷贝至全局堆外内存。
+     *
+     * @param content 报文文本内容
      */
     public HttpMessage(String content) {
         super(allocateGlobal(content));
     }
 
+    // ==========================================
+    //       内存分配辅助方法
+    // ==========================================
+
     /**
-     * 在全局作用域分配堆外内存并存入数据。
-     * <p>
-     * 使用 {@link Arena#global()} 确保内存段在 JVM 整个生命周期内有效。
-     * 这对于静态常量是安全的，因为它们只需要初始化一次且无需释放。
-     *
-     * @param content 字符串内容
-     * @return 包含 US_ASCII 编码字节的原生内存段
+     * 在全局作用域分配内存并写入 ASCII 文本。
      */
     private static MemorySegment allocateGlobal(String content) {
-        // HTTP 协议头通常使用 US-ASCII 编码
-        byte[] bytes = content.getBytes(StandardCharsets.US_ASCII);
+        return allocateGlobal(content.getBytes(StandardCharsets.US_ASCII));
+    }
 
-        // 申请全局内存，大小等于字节数组长度
+    /**
+     * 在全局作用域 (Global Arena) 分配内存并执行字节拷贝。
+     * <p>
+     * <strong>注意：</strong> 使用 {@link Arena#global()} 分配的内存直到进程结束才会被回收，
+     * 仅适用于生命周期贯穿整个压测周期的静态报文。
+     *
+     * @param bytes 原始字节数组
+     * @return 包含数据的全局堆外内存段
+     */
+    private static MemorySegment allocateGlobal(byte[] bytes) {
         MemorySegment seg = Arena.global().allocate(bytes.length);
-
-        // 将 Java 堆内的字节数组复制到堆外内存
         seg.copyFrom(MemorySegment.ofArray(bytes));
-
         return seg;
+    }
+
+    // ==========================================
+    //       工厂方法
+    // ==========================================
+
+    /**
+     * 基于 {@link DataSource} 动态构建带响应头的 HTTP 消息。
+     * <p>
+     * 该方法会自动识别数据源类型，推断 MIME 类型，并将 Header 与 Body 拼接至一块连续的堆外内存中。
+     * 拼接过程采用内存直接拷贝，避免了 Java 堆内的二次中转。
+     * </p>
+     *
+     * @param source 原始数据源（如 {@link FileDataSource}）
+     * @return 封装好的 HTTP 响应消息实例
+     * @throws IllegalArgumentException 当文件扩展名无法识别或数据源类型不受支持时抛出
+     * @throws RuntimeException 当 IO 操作异常时抛出
+     */
+    public static HttpMessage buildResponse(DataSource source) {
+        try {
+            long bodySize = source.size();
+
+            // 1. 推断 Content-Type
+            String contentType;
+            if (source instanceof FileDataSource fs) {
+                String fileName = fs.getFileName();
+                if (fileName.endsWith(".html")) {
+                    contentType = "text/html";
+                } else if (fileName.endsWith(".json")) {
+                    contentType = "application/json";
+                } else if (fileName.endsWith(".txt")) {
+                    contentType = "text/plain";
+                } else {
+                    throw new IllegalArgumentException("Build failed: Unsupported file extension -> " + fileName);
+                }
+            } else {
+                throw new IllegalArgumentException("Build failed: Unknown DataSource type -> " + source.getClass().getName());
+            }
+
+            // 2. 构建 Header 字符串
+            String header = "HTTP/1.1 200 OK\r\n" +
+                    "Content-Type: " + contentType + "\r\n" +
+                    "Content-Length: " + bodySize + "\r\n" +
+                    "Connection: keep-alive\r\n" +
+                    "\r\n";
+
+            byte[] headerBytes = header.getBytes(StandardCharsets.US_ASCII);
+            long totalSize = headerBytes.length + bodySize;
+
+            // 3. 分配最终内存：分配一块足以容纳 Header + Body 的连续空间
+            MemorySegment finalSegment = Arena.global().allocate(totalSize);
+
+            // 4. 拷贝 Header
+            MemorySegment.copy(MemorySegment.ofArray(headerBytes), 0, finalSegment, 0, headerBytes.length);
+
+            // 5. 零拷贝写入 Body
+            try (Arena tempArena = Arena.ofConfined()) {
+                MemorySegment fileData = source.load(tempArena);
+                MemorySegment.copy(fileData, 0, finalSegment, headerBytes.length, bodySize);
+            }
+
+            return new HttpMessage(finalSegment);
+
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to build HTTP message from source", e);
+        }
+    }
+
+    /**
+     * 原始报文加载 (Raw Load)。
+     * <p>
+     * 不对数据源进行任何 HTTP 协议封装，直接将源内容完整读取并映射至堆外内存。
+     * 该方法通常用于加载已经过预处理（包含 Header 和 Body）的原始请求文件。
+     * </p>
+     *
+     * @param source 数据源
+     * @return 封装好的原始消息实例
+     * @throws RuntimeException 加载过程中发生 IO 错误
+     */
+    public static HttpMessage load(DataSource source) {
+        try {
+            long size = source.size();
+
+            // 1. 在 Global Arena 分配内存
+            MemorySegment segment = Arena.global().allocate(size);
+
+            // 2. 内存段直接拷贝
+            try (Arena tempArena = Arena.ofConfined()) {
+                MemorySegment fileData = source.load(tempArena);
+                MemorySegment.copy(fileData, 0, segment, 0, size);
+            }
+
+            return new HttpMessage(segment);
+
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load raw HTTP message", e);
+        }
     }
 }
