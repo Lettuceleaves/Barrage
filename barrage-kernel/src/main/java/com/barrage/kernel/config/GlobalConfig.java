@@ -16,10 +16,10 @@ public class GlobalConfig {
     // --- 核心配置 ---
     private static int serverThreads = 8;
     private static int clientThreads = 8;
-    private static int connsPerClient = 128;
+    private static int connsPerClient = 8;
     private static int inFlight = 16;
     private static int queueDepth = 4096;
-    private static int batchSize = 16;
+    private static int batchSize = 8;
     private static int readSz = 1024;
 
     /**
