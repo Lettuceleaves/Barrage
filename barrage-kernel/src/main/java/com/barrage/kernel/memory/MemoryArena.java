@@ -1,9 +1,10 @@
 package com.barrage.kernel.memory;
 
+import com.barrage.kernel.config.GlobalConfig;
+
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import static com.barrage.kernel.config.GlobalConfig.READ_SZ;
 
 /**
  * 基于 FFM API 的高性能定长内存池管理器 (Slab Allocator)。
@@ -43,7 +44,7 @@ public class MemoryArena {
     /** 数据缓冲区 (BUFFER) 的起始偏移量：8 */
     private static final long OFF_BUFFER = 8;
     /** 单个 Slot 的总字节大小 */
-    private static final long SLOT_SIZE = 4 + 4 + READ_SZ;
+    private static final long SLOT_SIZE = 4 + 4 + GlobalConfig.getREAD_SZ();
 
     /** * 核心内存块 (Slab)。
      * 所有的 Slot 都位于这块连续的堆外内存上。
@@ -87,7 +88,7 @@ public class MemoryArena {
 
             // 预先创建好 buffer 部分的 slice，供 io_uring read/write 使用
             // 这个 slice 对象会被 JVM 堆缓存，生命周期内一直复用，实现 Zero-GC
-            this.cachedBuffers[i] = slab.asSlice(i * SLOT_SIZE + OFF_BUFFER, READ_SZ);
+            this.cachedBuffers[i] = slab.asSlice(i * SLOT_SIZE + OFF_BUFFER, GlobalConfig.getREAD_SZ());
         }
         this.top = capacity;
     }

@@ -182,23 +182,23 @@ public class HttpMessage extends Message {
      * @return 封装好的原始消息实例
      * @throws RuntimeException 加载过程中发生 IO 错误
      */
-    public static HttpMessage load(DataSource source) {
+    public static HttpMessage load(DataSource source, Arena arena) {
         try {
-            long size = source.size();
+            // 1. 直接从数据源加载。
+            // 如果是 FileDataSource，它返回的是 mmap 映射；
+            // 如果是 ConsoleDataSource，它返回的是从 MemoryArena 借出的切片。
+            MemorySegment segment = source.load(arena);
 
-            // 1. 在 Global Arena 分配内存
-            MemorySegment segment = Arena.global().allocate(size);
-
-            // 2. 内存段直接拷贝
-            try (Arena tempArena = Arena.ofConfined()) {
-                MemorySegment fileData = source.load(tempArena);
-                MemorySegment.copy(fileData, 0, segment, 0, size);
+            // 2. 验证有效性
+            if (segment == null || segment.byteSize() == 0) {
+                throw new IOException("Loaded empty or null data segment from source.");
             }
 
+            // 3. 直接包装并返回，实现真正的 Zero-Copy
             return new HttpMessage(segment);
 
         } catch (IOException e) {
-            throw new RuntimeException("Failed to load raw HTTP message", e);
+            throw new RuntimeException("Failed to load raw HTTP message from source", e);
         }
     }
 }
