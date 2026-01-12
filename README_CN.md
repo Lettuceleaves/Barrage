@@ -40,11 +40,11 @@
 ### 1. 克隆仓库
 
  ```bash
- git clone [https://github.com/](https://github.com/)<owner>/barrage.git
+ git clone https://github.com/Lettuceleaves/Barrage.git
  cd barrage
  ```
 
-### 2. 构建项目
+### 2. 构建项目（推荐使用容器化开发环境）
 
 使用 Maven 进行编译和打包。确保你的 Maven 使用的是 JDK 22+。
 
@@ -53,16 +53,12 @@
  mvn clean package
  ```
 
-### 3. 准备测试数据 (可选)
-
-如果你选择文件作为数据源，可以准备一个简单的 HTTP 请求文件：
-
  ```bash
  mkdir -p tmp
  echo -e "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n" > tmp/http_request.txt
  ```
 
-### 4. 运行压测
+### 3. 运行压测
 
 目前 Barrage 提供交互式 CLI 界面。运行 target 目录下的 jar 包：
 
@@ -123,12 +119,11 @@ WARNING: Restricted methods will be blocked in a future release unless native ac
 >>> [10s] Avg QPS: 2354 k/s (Total: 23541033)
 >>> [11s] Avg QPS: 2327 k/s (Total: 25602846)
 >>> [12s] Avg QPS: 2300 k/s (Total: 27610597)
-
-进程已结束，退出代码为 130 (interrupted by signal 2:SIGINT)
+...
  ```
 ## 容器化开发支持 (Dev Containers)
 
-为了方便开发者在不同操作系统（尤其是 Windows/macOS）上构建开发环境，本项目内置了标准的 **Dev Container** 配置。该环境已预装 OpenJDK 22、Maven 以及必要的 Linux 构建工具链，确保了开发环境的一致性。
+为了方便开发者在不同操作系统（尤其是 Windows/macOS）上构建开发环境，本项目内置了标准的 **Dev Container** 配置。该环境已预装 Graalvm-ce-25、Maven 以及必要的 Linux 构建工具链，确保了开发环境的一致性。
 
 ### 支持的 IDE
 * **VS Code**: 需安装 [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) 扩展。
@@ -149,14 +144,14 @@ WARNING: Restricted methods will be blocked in a future release unless native ac
 
 关键参数说明：
 
-| 参数名 | 默认值 | 说明 | 调优建议 |
- | :--- | :--- | :--- | :--- |
-| `serverThreads` | 2 | 内置基准服务端的 Worker 线程数。 | 建议设置为 CPU 核心数的一半。 |
-| `clientThreads` | 2 | 压测客户端的 Worker 线程数。 | 建议设置为 CPU 核心数的一半。 |
-| `connsPerClient` | 8 | 每个客户端线程维护的长连接数。 | 增加此值可提高并发度，但会增加内存开销。 |
-| `inFlight` | 16 | HTTP 流水线 (Pipelining) 深度。决定未收到响应前连续发送的请求数。 | 针对高延迟网络增加此值以填满 BDP。 |
+| 参数名 | 默认值  | 说明 | 调优建议 |
+ | :--- |:-----| :--- | :--- |
+| `serverThreads` | 1    | 内置基准服务端的 Worker 线程数。 | 建议设置为 CPU 核心数的一半。 |
+| `clientThreads` | 1    | 压测客户端的 Worker 线程数。 | 建议设置为 CPU 核心数的一半。 |
+| `connsPerClient` | 1    | 每个客户端线程维护的长连接数。 | 增加此值可提高并发度，但会增加内存开销。 |
+| `inFlight` | 16   | HTTP 流水线 (Pipelining) 深度。决定未收到响应前连续发送的请求数。 | 针对高延迟网络增加此值以填满 BDP。 |
 | `queueDepth` | 4096 | io_uring 提交/完成队列的深度。必须是 2 的幂。 | 保持较大值以减少系统调用频率。 |
-| `batchSize` | 1 | 系统调用批处理大小。 | 增大此值可摊薄 syscall 开销，但可能会略微增加延迟。 |
+| `batchSize` | 16   | 系统调用批处理大小。 | 增大此值可摊薄 syscall 开销，但可能会略微增加延迟。 |
 
 ## 技术栈
 
