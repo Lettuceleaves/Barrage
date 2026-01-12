@@ -10,10 +10,24 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 严格的 HTTP/1.1 协议规则实现。
+ * HTTP/1.1 协议构建规则的具体实现。
  * <p>
- * 该类负责校验用户输入、同步全局配置并构建符合 RFC 9112 规范的报文。
- * </p>
+ * 该类负责将用户输入的松散参数（Method, Host, Path 等）转换为符合 RFC 9112 标准的
+ * 严格 HTTP 报文格式。它不仅充当协议格式化器，还兼任输入校验器。
+ *
+ * <h2>核心职责：</h2>
+ * <ul>
+ * <li><b>合规性校验：</b> 强制检查 HTTP 方法合法性、端口范围及 Host 格式。</li>
+ * <li><b>状态同步：</b> 构建成功后，自动将目标 Host 和 Port 同步至 {@link GlobalConfig}，
+ * 确保底层的 {@code ClientEngine} 能够连接到正确的目标。</li>
+ * <li><b>报文组装：</b> 自动计算 {@code Content-Length}，强制开启 {@code Connection: keep-alive}，
+ * 并处理 CRLF (\r\n) 分隔符。</li>
+ * </ul>
+ *
+ * @author LettuceLeaves
+ * @version 1.0
+ * @since 2026/1/12
+ * @see ProtocolRule
  */
 public class HttpRule implements ProtocolRule {
     private static final String CRLF = "\r\n";
@@ -28,12 +42,33 @@ public class HttpRule implements ProtocolRule {
             "^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\\-]*[a-zA-Z0-9])\\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\\-]*[A-Za-z0-9])$"
     );
 
+    /**
+     * 获取构建 HTTP 报文所需的必要组件列表。
+     * <p>
+     * 这些组件名称将作为 {@code ConsoleDataSource} 的交互提示符。
+     *
+     * @return 包含 "Method", "Host", "Port", "Path", "Body" 的列表
+     */
     @Override
     public List<String> requiredComponents() {
         // 定义交互式装填所需的五个核心维度
         return List.of("Method", "Host", "Port", "Path", "Body");
     }
 
+    /**
+     * 执行构建逻辑。
+     * <p>
+     * 该方法包含三个阶段：
+     * <ol>
+     * <li><b>数据清洗：</b> 读取 Map 输入，若缺失则回退到 {@link GlobalConfig} 的默认值。</li>
+     * <li><b>严格校验：</b> 验证格式并更新 {@link GlobalConfig} 的目标端点。</li>
+     * <li><b>协议序列化：</b> 使用 {@link StringBuilder} 拼接最终的 HTTP 报文。</li>
+     * </ol>
+     *
+     * @param components 包含用户输入值的键值对映射
+     * @return 符合 HTTP/1.1 格式的请求字符串（包含 Header 和 Body）
+     * @throws IllegalArgumentException 如果 Method 非法、端口越界或 Host 格式错误
+     */
     @Override
     public String build(Map<String, Object> components) {
         // --- 1. 数据提取与默认值注入 (关联 GlobalConfig) ---
@@ -68,7 +103,8 @@ public class HttpRule implements ProtocolRule {
             throw new IllegalArgumentException("Invalid Port: " + rawPort + " (Must be 1-65535)");
         }
 
-        // 将校验通过的参数同步到全局配置类
+        // 关键副作用：将校验通过的参数同步到全局配置类
+        // 这确保了 ClientEngine 能够连接到用户刚刚输入的地址
         GlobalConfig.updateEndpoint(host, port);
 
         // D. Path 校验
@@ -77,6 +113,7 @@ public class HttpRule implements ProtocolRule {
 
         // --- 3. 按照 RFC 规范拼装零拷贝报文模板 ---
         StringBuilder sb = new StringBuilder();
+        // 只有非标准端口才需要在 Host 头中显式携带端口号
         String finalHost = (port == 80 || port == 443) ? host : host + ":" + port;
 
         // 起始行 (Request Line)
@@ -84,12 +121,12 @@ public class HttpRule implements ProtocolRule {
 
         // 头部字段 (Mandatory Headers)
         sb.append("Host: ").append(finalHost).append(CRLF);
-        sb.append("Connection: keep-alive").append(CRLF); // 压测默认长连接
+        sb.append("Connection: keep-alive").append(CRLF); // 压测默认强制长连接
         sb.append("User-Agent: Barrage-Kernel/1.0").append(CRLF);
 
         // Body 处理与 Content-Length 自动计算
         if (!rawBody.isEmpty()) {
-            // 使用 UTF-8 字节长度，确保多字节字符不会导致报文截断
+            // 使用 UTF-8 字节长度，确保多字节字符（如中文）不会导致报文截断或解析错误
             byte[] bodyBytes = rawBody.getBytes(StandardCharsets.UTF_8);
             sb.append("Content-Length: ").append(bodyBytes.length).append(CRLF);
             sb.append(CRLF); // Header 与 Body 之间的空行
