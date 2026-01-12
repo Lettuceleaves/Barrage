@@ -1,6 +1,7 @@
 # Barrage Load Tester
 
-[![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)](https://github.com/<owner>/<repo>/actions/workflows/ci.yml)
+<img src="./docs/logo.png" width="40" height="40" style="border-radius: 50%; vertical-align: middle;" alt="图标">
+
 [![Maven Central](https://img.shields.io/maven-central/v/com.github.<owner>/barrage.svg)](https://search.maven.org/artifact/com.github.<owner>/barrage)
 [![License](https://img.shields.io/github/license/<owner>/<repo>.svg)](https://github.com/<owner>/<repo>/blob/main/LICENSE)
 

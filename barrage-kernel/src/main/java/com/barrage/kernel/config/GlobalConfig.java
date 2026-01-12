@@ -30,13 +30,13 @@ public class GlobalConfig {
     // --- 核心配置 ---
 
     /** 服务端 Worker 线程数（通常建议等于 CPU 物理核心数） */
-    private static int serverThreads = 2;
+    private static int serverThreads = 8;
 
     /** 客户端 Worker 线程数（用于压测引擎） */
-    private static int clientThreads = 2;
+    private static int clientThreads = 8;
 
     /** 客户端每个 Worker 建立的连接数（连接池大小） */
-    private static int connsPerClient = 8;
+    private static int connsPerClient = 128;
 
     /** * HTTP 流水线深度 (Pipelining Depth)。
      * <p>决定了在未收到响应前，允许连续发送多少个请求。
@@ -53,7 +53,7 @@ public class GlobalConfig {
      * <p>决定了一次 {@code io_uring_submit} 最多提交多少个 SQE，
      * 或一次 {@code peek} 最多处理多少个 CQE。用于摊薄上下文切换开销。
      */
-    private static int batchSize = 1;
+    private static int batchSize = 16;
 
     /** 单次读取的缓冲区大小 (Bytes) */
     private static int readSz = 1024;
