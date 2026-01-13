@@ -12,6 +12,8 @@ import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Objects;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -64,20 +66,24 @@ public class ClientEngine {
     private final HttpMessage requestTemplate;
     private final int batchSize;
 
-    // 必须使用全局 Arena，因为该 Buffer 跨多个线程共享且生命周期覆盖整个引擎
     private final Arena globalArena = Arena.ofShared();
     private MemorySegment batchedRequest;
 
     @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Intentionally sharing LongAdder for metrics aggregation")
-    public ClientEngine(String targetIp, int targetPort, int threads, LongAdder qpsCounter, HttpMessage requestTemplate) {
-        this.targetIp = Objects.requireNonNull(targetIp);
+    public ClientEngine(String targetHost, int targetPort, int threads, LongAdder qpsCounter, HttpMessage requestTemplate) {
+        try {
+            this.targetIp = InetAddress.getByName(targetHost).getHostAddress();
+            System.out.println("[ClientEngine] Resolved host '" + targetHost + "' to IP: " + this.targetIp);
+        } catch (UnknownHostException e) {
+            throw new RuntimeException("DNS Resolve failed for host: " + targetHost, e);
+        }
+        
         this.targetPort = targetPort;
         this.threads = threads;
         this.qpsCounter = Objects.requireNonNull(qpsCounter);
         this.requestTemplate = Objects.requireNonNull(requestTemplate);
         this.batchSize = GlobalConfig.getBATCH_SIZE();
 
-        // 在构造阶段完成批量装填预处理
         prepareBatchedRequest();
     }
 
@@ -115,7 +121,6 @@ public class ClientEngine {
         private final LongAdder counter;
         private static final int EVENT_READ = 1;
         private static final int EVENT_WRITE = 2;
-        // "HTTP" ASCII 对应的整数值 (小端序: 'H'(0x48), 'T'(0x54), 'T'(0x54), 'P'(0x50) -> 0x50545448)
         private static final int HTTP_HEADER_INT = 0x50545448;
 
         ClientWorker(LongAdder counter) {
@@ -128,27 +133,23 @@ public class ClientEngine {
                  IoUring ring = new IoUring(GlobalConfig.getQUEUE_DEPTH())) {
 
                 int conns = GlobalConfig.getCONNS_PER_CLIENT();
-                // 为每个连接预分配读缓冲区，大小需覆盖 flight 窗口
                 MemoryArena memoryArena = new MemoryArena(arena, conns * (GlobalConfig.getIN_FLIGHT() + 4));
                 IoUring.Cqe cqe = new IoUring.Cqe();
 
                 // 初始建连
                 for (int i = 0; i < conns; i++) {
-                    connect(ring, memoryArena);
+                    connectBlocking(ring, memoryArena);
                 }
                 ring.submitAndWait(0);
 
-                // 主事件循环
                 while (true) {
                     int processed = 0;
-                    // 批量处理 CQE，直到达到批次上限或队列为空
                     while (processed < batchSize && ring.peekCqe(cqe)) {
                         long userData = cqe.userData;
                         int idx = (int) userData;
                         int type = (int) (userData >>> 32);
 
                         if (cqe.res < 0) {
-                            // 发生错误（如连接断开），执行重连逻辑
                             reconnect(memoryArena.getFd(idx), idx, ring, memoryArena);
                             processed++;
                             continue;
@@ -157,30 +158,24 @@ public class ClientEngine {
                         int fd = memoryArena.getFd(idx);
 
                         if (type == EVENT_WRITE) {
-                            // 写完成，切换为读状态
                             addRead(ring, fd, idx, memoryArena);
-                        } else { // EVENT_READ
+                        } else { 
                             int res = cqe.res;
                             if (res == 0) {
-                                // EOF，对端关闭连接
                                 reconnect(fd, idx, ring, memoryArena);
                             } else {
-                                // 读取数据成功，扫描响应计数
                                 MemorySegment buffer = memoryArena.getBuffer(idx);
                                 int found = countResponsesInBuffer(buffer, res);
                                 if (found > 0) {
                                     counter.add(found);
-                                    // 收到响应后，继续发送下一批请求 (Pipeline)
                                     addWrite(ring, fd, idx, memoryArena);
                                 } else {
-                                    // 数据不完整，继续读取
                                     addRead(ring, fd, idx, memoryArena);
                                 }
                             }
                         }
                         processed++;
                     }
-                    // 如果处理了事件，非阻塞提交；否则进入阻塞等待，减少 CPU 空转
                     ring.submitAndWait(processed > 0 ? 0 : 1);
                 }
             } catch (RuntimeException e) {
@@ -190,60 +185,79 @@ public class ClientEngine {
             }
         }
 
-        /**
-         * 高性能 Buffer 扫描：统计出现多少个 HTTP 响应头。
-         * <p>
-         * 利用 {@code int} (4字节) 比较代替逐字节比较，属于 SWAR (SIMD Within A Register) 的一种简单应用。
-         * 该方法是热点代码，Graal 编译器应能将其内联并进行向量化优化。
-         *
-         * @param buffer 包含接收数据的内存段
-         * @param length 数据长度
-         * @return 识别到的 HTTP 响应数量
-         */
         private int countResponsesInBuffer(MemorySegment buffer, int length) {
             if (length < 4) return 0;
             int count = 0;
-            // 每次读取 4 字节进行滑动匹配
             for (long i = 0; i <= length - 4; i++) {
                 if (buffer.get(ValueLayout.JAVA_INT_UNALIGNED, i) == HTTP_HEADER_INT) {
                     count++;
-                    // 启发式优化：找到一个 Header 后，跳过部分字节（假设最小响应头长度）
-                    // 减少无效比较次数，极致压榨性能
                     i += 10;
                 }
             }
             return count;
         }
 
+        // 运行时重连：死循环重试
         private void reconnect(int oldFd, int idx, IoUring ring, MemoryArena arena) {
-            new NativeSocket(oldFd).close();
-            arena.free(idx);
-            connect(ring, arena);
+            try { new NativeSocket(oldFd).close(); } catch (Exception e) {}
+
+            NativeSocket s = null;
+            int retryCount = 0;
+
+            while (true) {
+                try {
+                    s = new NativeSocket();
+                    if (s.connect(targetIp, targetPort)) {
+                        int newFd = s.getFd();
+                        arena.setFd(idx, newFd);
+                        addWrite(ring, newFd, idx, arena);
+                        return;
+                    } else {
+                        s.close();
+                    }
+                } catch (IOException e) {
+                    if (s != null) { s.close(); }
+                }
+
+                retryCount++;
+                try { Thread.sleep(10); } catch (InterruptedException e) {}
+            }
         }
 
-        private boolean connect(IoUring ring, MemoryArena arena) {
+        // 【新增】启动时阻塞连接：带日志和重试
+        private void connectBlocking(IoUring ring, MemoryArena arena) {
             NativeSocket s = null;
-            try {
-                s = new NativeSocket();
-                if (!s.connect(targetIp, targetPort)) return false;
-                int fd = s.getFd();
-                // 连接建立后，预先填满 pipeline
-                for (int k = 0; k < GlobalConfig.getIN_FLIGHT(); k++) {
-                    int idx = arena.allocate();
-                    arena.setFd(idx, fd);
-                    addWrite(ring, fd, idx, arena);
+            int retry = 0;
+            while (true) {
+                try {
+                    s = new NativeSocket();
+                    if (s.connect(targetIp, targetPort)) {
+                        int fd = s.getFd();
+                        // 批量填满流水线
+                        for (int k = 0; k < GlobalConfig.getIN_FLIGHT(); k++) {
+                            int idx = arena.allocate();
+                            arena.setFd(idx, fd);
+                            addWrite(ring, fd, idx, arena);
+                        }
+                        return; // 成功！
+                    } else {
+                        System.err.println("[Init] Connect failed to " + targetIp + ":" + targetPort + ", retrying...");
+                        s.close();
+                    }
+                } catch (Exception e) {
+                    System.err.println("[Init] Connect error: " + e.getMessage());
+                    if (s != null) try { s.close(); } catch (Exception ex) {}
                 }
-                return true;
-            } catch (IOException e) {
-                if (s != null) s.close();
-                return false;
+                
+                // 失败等待 1 秒再试，避免刷屏
+                try { Thread.sleep(1000); } catch (InterruptedException e) {}
+                retry++;
             }
         }
 
         private void addWrite(IoUring r, int fd, int idx, MemoryArena arena) throws IOException {
             MemorySegment sqe = r.nextSqe();
             if (sqe == null) { r.submit(); sqe = r.nextSqe(); }
-            // 复用外部类预先构建的 batchedRequest，避免重复拷贝
             r.prepSend(sqe, fd, batchedRequest, (int) batchedRequest.byteSize(), 0);
             long packedData = ((long) EVENT_WRITE << 32) | (idx & 0xFFFFFFFFL);
             sqe.set(ValueLayout.JAVA_LONG, NativeConstants.SQE_OFF_USER_DATA, packedData);
