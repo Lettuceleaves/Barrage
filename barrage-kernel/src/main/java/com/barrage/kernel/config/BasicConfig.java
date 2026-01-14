@@ -21,22 +21,22 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
  * @since 2026/1/12
  */
 @SuppressFBWarnings(value = "MS_SHOULD_BE_FINAL", justification = "Configuration needs to be mutable for test scenarios")
-public class GlobalConfig {
+public class BasicConfig {
 
     // 1. 将字段设为 private，防止外部直接暴力修改
     private static String ip = "127.0.0.1";
-    private static int port = 8080;
+    private static int port = 8089;
 
     // --- 核心配置 ---
 
     /** 服务端 Worker 线程数（通常建议等于 CPU 物理核心数） */
-    private static int serverThreads = 1;
+    private static int serverThreads = 6;
 
     /** 客户端 Worker 线程数（用于压测引擎） */
-    private static int clientThreads = 1;
+    private static int clientThreads = 6;
 
     /** 客户端每个 Worker 建立的连接数（连接池大小） */
-    private static int connsPerClient = 1;
+    private static int connsPerClient = 8;
 
     /** * HTTP 流水线深度 (Pipelining Depth)。
      * <p>决定了在未收到响应前，允许连续发送多少个请求。

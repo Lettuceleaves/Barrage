@@ -1,6 +1,6 @@
 package com.barrage.protocol.datasource;
 
-import com.barrage.kernel.config.GlobalConfig;
+import com.barrage.kernel.config.BasicConfig;
 import com.barrage.kernel.memory.MemoryArena;
 import com.barrage.protocol.ProtocolRule;
 import java.io.IOException;
@@ -20,7 +20,7 @@ import java.util.Scanner;
  * <h2>功能特性：</h2>
  * <ul>
  * <li><b>交互式构建：</b> 根据 {@link ProtocolRule} 定义的必要组件，逐项提示用户输入。</li>
- * <li><b>智能默认值：</b> 自动读取 {@link GlobalConfig} 中的 IP、端口配置作为默认选项，
+ * <li><b>智能默认值：</b> 自动读取 {@link BasicConfig} 中的 IP、端口配置作为默认选项，
  * 用户只需按回车即可使用当前系统配置。</li>
  * <li><b>内存桥接：</b> 虽然输入过程涉及 Java String 和 Heap 对象，但在 {@link #load} 完成后，
  * 数据会被立即“固化”到 {@link MemoryArena} 堆外内存中，供引擎进行零拷贝发送。</li>
@@ -94,7 +94,7 @@ public class ConsoleDataSource extends DataSource {
      * 核心装填逻辑：根据 Rule 定义的元数据进行控制台提问。
      * <p>
      * 遍历 {@link ProtocolRule#requiredComponents()} 返回的所有字段，
-     * 结合 {@link GlobalConfig} 提供智能默认值。
+     * 结合 {@link BasicConfig} 提供智能默认值。
      *
      * @return 包含组件名和用户输入值的映射表
      */
@@ -127,7 +127,7 @@ public class ConsoleDataSource extends DataSource {
     /**
      * 根据组件名称获取建议的默认值。
      * <p>
-     * 实现了组件名到 {@link GlobalConfig} 静态配置的动态映射。
+     * 实现了组件名到 {@link BasicConfig} 静态配置的动态映射。
      *
      * @param component 组件名称（如 "Host", "Port"）
      * @return 默认值字符串，如果无对应默认值则返回空串
@@ -135,8 +135,8 @@ public class ConsoleDataSource extends DataSource {
     private String getDefaultValueFor(String component) {
         return switch (component) {
             case "Method" -> "GET";
-            case "Host"   -> GlobalConfig.getIP();
-            case "Port"   -> String.valueOf(GlobalConfig.getPORT());
+            case "Host"   -> BasicConfig.getIP();
+            case "Port"   -> String.valueOf(BasicConfig.getPORT());
             case "Path"   -> "/";
             case "Body"   -> ""; // Body 默认留空
             default       -> "";

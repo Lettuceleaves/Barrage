@@ -1,6 +1,6 @@
 package com.barrage.protocol.HTTP;
 
-import com.barrage.kernel.config.GlobalConfig;
+import com.barrage.kernel.config.BasicConfig;
 import com.barrage.protocol.ProtocolRule;
 
 import java.nio.charset.StandardCharsets;
@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
  * <h2>核心职责：</h2>
  * <ul>
  * <li><b>合规性校验：</b> 强制检查 HTTP 方法合法性、端口范围及 Host 格式。</li>
- * <li><b>状态同步：</b> 构建成功后，自动将目标 Host 和 Port 同步至 {@link GlobalConfig}，
+ * <li><b>状态同步：</b> 构建成功后，自动将目标 Host 和 Port 同步至 {@link BasicConfig}，
  * 确保底层的 {@code ClientEngine} 能够连接到正确的目标。</li>
  * <li><b>报文组装：</b> 自动计算 {@code Content-Length}，强制开启 {@code Connection: keep-alive}，
  * 并处理 CRLF (\r\n) 分隔符。</li>
@@ -60,8 +60,8 @@ public class HttpRule implements ProtocolRule {
      * <p>
      * 该方法包含三个阶段：
      * <ol>
-     * <li><b>数据清洗：</b> 读取 Map 输入，若缺失则回退到 {@link GlobalConfig} 的默认值。</li>
-     * <li><b>严格校验：</b> 验证格式并更新 {@link GlobalConfig} 的目标端点。</li>
+     * <li><b>数据清洗：</b> 读取 Map 输入，若缺失则回退到 {@link BasicConfig} 的默认值。</li>
+     * <li><b>严格校验：</b> 验证格式并更新 {@link BasicConfig} 的目标端点。</li>
      * <li><b>协议序列化：</b> 使用 {@link StringBuilder} 拼接最终的 HTTP 报文。</li>
      * </ol>
      *
@@ -73,8 +73,8 @@ public class HttpRule implements ProtocolRule {
     public String build(Map<String, Object> components) {
         // --- 1. 数据提取与默认值注入 (关联 GlobalConfig) ---
         String rawMethod = (String) components.getOrDefault("Method", "GET");
-        String rawHost = (String) components.getOrDefault("Host", GlobalConfig.getIP());
-        String rawPort = (String) components.getOrDefault("Port", String.valueOf(GlobalConfig.getPORT()));
+        String rawHost = (String) components.getOrDefault("Host", BasicConfig.getIP());
+        String rawPort = (String) components.getOrDefault("Port", String.valueOf(BasicConfig.getPORT()));
         String rawPath = (String) components.getOrDefault("Path", "/");
         String rawBody = (String) components.getOrDefault("Body", "");
 
@@ -105,7 +105,7 @@ public class HttpRule implements ProtocolRule {
 
         // 关键副作用：将校验通过的参数同步到全局配置类
         // 这确保了 ClientEngine 能够连接到用户刚刚输入的地址
-        GlobalConfig.updateEndpoint(host, port);
+        BasicConfig.updateEndpoint(host, port);
 
         // D. Path 校验
         String path = rawPath.trim();

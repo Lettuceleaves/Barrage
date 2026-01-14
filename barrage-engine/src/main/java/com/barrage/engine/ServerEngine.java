@@ -1,6 +1,6 @@
 package com.barrage.engine;
 
-import com.barrage.kernel.config.GlobalConfig;
+import com.barrage.kernel.config.BasicConfig;
 import com.barrage.kernel.io.IoUring;
 import com.barrage.kernel.io.NativeConstants;
 import com.barrage.kernel.io.NativeSocket;
@@ -90,7 +90,7 @@ public class ServerEngine {
         s.bind(port);
         // 设置足够的 Backlog 以应对百万级 QPS 的连接建立需求
         // 这里的队列深度决定了内核全连接队列的大小
-        s.listen(GlobalConfig.getQUEUE_DEPTH());
+        s.listen(BasicConfig.getQUEUE_DEPTH());
 
         this.serverFd = s.getFd();
 
@@ -130,10 +130,10 @@ public class ServerEngine {
             // 使用 Confined Arena 确保线程本地内存分配的极高性能
             // 所有在此 Arena 分配的内存仅限当前线程访问，无需 volatile 或同步
             try (Arena arena = Arena.ofConfined();
-                 IoUring ring = new IoUring(GlobalConfig.getQUEUE_DEPTH())) {
+                 IoUring ring = new IoUring(BasicConfig.getQUEUE_DEPTH())) {
 
                 // 内存池大小：连接数 * 2（Read/Write 槽位分离，预留充足空间）
-                MemoryArena memoryArena = new MemoryArena(arena, GlobalConfig.getQUEUE_DEPTH() * 2);
+                MemoryArena memoryArena = new MemoryArena(arena, BasicConfig.getQUEUE_DEPTH() * 2);
                 IoUring.Cqe cqe = new IoUring.Cqe();
 
                 // 提交初始 Accept 请求，将监听 Socket 加入 io_uring 轮询
@@ -146,7 +146,7 @@ public class ServerEngine {
                     int cqeCount = 0;
                     // 批量处理：这是保持高 QPS 的关键。
                     // 尽可能多地从 CQ (Completion Queue) 取出事件，摊薄 Java/Native 切换开销。
-                    while (cqeCount < GlobalConfig.getBATCH_SIZE() && ring.peekCqe(cqe)) {
+                    while (cqeCount < BasicConfig.getBATCH_SIZE() && ring.peekCqe(cqe)) {
                         processEvent(ring, cqe, memoryArena);
                         cqeCount++;
                     }
@@ -240,7 +240,7 @@ public class ServerEngine {
             MemorySegment sqe = r.nextSqe();
             if (sqe == null) return;
 
-            r.prepRead(sqe, fd, arena.getBuffer(idx), GlobalConfig.getREAD_SZ(), 0);
+            r.prepRead(sqe, fd, arena.getBuffer(idx), BasicConfig.getREAD_SZ(), 0);
             arena.setEventInfo(idx, EVENT_READ, fd);
             sqe.set(ValueLayout.JAVA_LONG, NativeConstants.SQE_OFF_USER_DATA, idx);
         }
