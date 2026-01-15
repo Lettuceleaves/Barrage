@@ -12,80 +12,77 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 基于 io_uring 的高性能 HTTP 服务端引擎。
+ * 终极修复版 N-to-N 服务端引擎 (Byte-Scan Version)
  * <p>
- * 架构：Thread-Per-Core + Multi-Reactor
- * 特性：Zero-Copy, Lock-Free, Zero-GC (Runtime)
- * <p>
- * 变更说明：
- * 1. 移除了 HttpMessage 依赖，使用全局共享 Segment 存储静态响应。
- * 2. 优化了 Accept/Read/Write 的事件循环逻辑。
+ * 修复核心：
+ * 1. 放弃 int 强转扫描，改为逐字节匹配，彻底解决大小端/对齐造成的漏扫问题。
+ * 2. 增加“幽灵 Batch”检测日志，当读取大包但只识别出 1 个请求时报警。
  */
 public class ServerEngine {
     private final int port;
     private final int threads;
     private int serverFd;
 
-    // 全局共享的响应内存块 (Off-Heap)
-    // 所有 Worker 线程读取同一块内存进行发送，无需复制
     private final Arena globalArena = Arena.ofShared();
     private final MemorySegment sharedResponseSegment;
 
-    /**
-     * 构建服务端引擎。
-     *
-     * @param port    监听端口
-     * @param threads Worker 线程数
-     */
+    // 强制 16KB 读缓冲
+    private static final int ROBUST_READ_SZ = 16 * 1024;
+
+    public static final AtomicLong REQ_IDENTIFIED = new AtomicLong(0);
+
     public ServerEngine(int port, int threads) {
         this.port = port;
         this.threads = threads;
 
-        // 初始化静态响应报文 (HTTP/1.1 200 OK)
         byte[] responseBytes = (
                 "HTTP/1.1 200 OK\r\n" +
                         "Content-Type: text/plain\r\n" +
                         "Content-Length: 12\r\n" +
                         "Connection: keep-alive\r\n" +
-                        "Server: Barrage-Engine\r\n" +
+                        "Server: Barrage-Final\r\n" +
                         "\r\n" +
                         "Hello World!"
         ).getBytes(StandardCharsets.UTF_8);
 
-        // 将响应“固化”到堆外内存
         this.sharedResponseSegment = globalArena.allocate(responseBytes.length);
         MemorySegment.copy(MemorySegment.ofArray(responseBytes), 0, sharedResponseSegment, 0, responseBytes.length);
     }
 
     public void start() throws IOException {
-        // 1. 初始化监听 Socket
+        System.out.println("[ServerEngine] Force setting BasicConfig.READ_SZ to " + ROBUST_READ_SZ);
+        BasicConfig.setREAD_SZ(ROBUST_READ_SZ);
+
         NativeSocket s = new NativeSocket();
-
-        // 关键：强制设置 SO_REUSEADDR，允许在 TIME_WAIT 状态下重启服务
         s.setReuseAddr();
-
         s.bind(port);
         s.listen(BasicConfig.getQUEUE_DEPTH());
-
         this.serverFd = s.getFd();
 
-        System.out.println("[ServerEngine] Listening on port " + port + " (FD: " + serverFd + ")");
-        System.out.println("[ServerEngine] Static Response Size: " + sharedResponseSegment.byteSize() + " bytes");
+        System.out.println("[ServerEngine] Started. Using Byte-Level Scanning.");
 
-        // 2. 启动 Worker 线程
+        // 监控线程
+        new Thread(() -> {
+            while (true) {
+                try { Thread.sleep(1000); } catch (InterruptedException e) {}
+                long count = REQ_IDENTIFIED.getAndSet(0);
+                if (count > 0) {
+                    System.out.println("[Server Internal] Processed reqs/sec: " + count);
+                }
+            }
+        }).start();
+
         for (int i = 0; i < threads; i++) {
             new Thread(new ServerWorker(serverFd, sharedResponseSegment), "server-worker-" + i).start();
         }
     }
 
-    /**
-     * 核心工作线程
-     */
     private static class ServerWorker implements Runnable {
         private final int serverFd;
-        private final MemorySegment responseData; // 引用外部传入的共享内存
+        private final MemorySegment responseData;
 
         private static final int EVENT_ACCEPT = 0;
         private static final int EVENT_READ = 1;
@@ -99,91 +96,138 @@ public class ServerEngine {
         @Override
         @SuppressFBWarnings("REC_CATCH_EXCEPTION")
         public void run() {
-            // 线程封闭 Arena：Zero-GC 的核心
             try (Arena arena = Arena.ofConfined();
                  IoUring ring = new IoUring(BasicConfig.getQUEUE_DEPTH())) {
 
-                // 预分配内存池 (连接上下文)
                 MemoryArena memoryArena = new MemoryArena(arena, BasicConfig.getQUEUE_DEPTH() * 2);
                 IoUring.Cqe cqe = new IoUring.Cqe();
 
-                // 提交初始 Accept 请求
-                int initIdx = memoryArena.allocate();
-                addAccept(ring, serverFd, initIdx, memoryArena);
+                for (int i = 0; i < 32; i++) {
+                    int idx = memoryArena.allocate();
+                    if (idx != -1) addAccept(ring, serverFd, idx);
+                }
                 ring.submit();
 
-                // Core Loop
                 while (true) {
                     int cqeCount = 0;
-
-                    // Batch Processing: 批量处理 CQE 以减少系统调用开销
                     while (cqeCount < BasicConfig.getBATCH_SIZE() && ring.peekCqe(cqe)) {
                         processEvent(ring, cqe, memoryArena);
                         cqeCount++;
                     }
-
-                    if (cqeCount > 0) {
-                        // 有任务处理过，立即提交新任务
-                        ring.submitAndWait(0);
-                    } else {
-                        // 无任务，阻塞等待至少 1 个事件 (防空转)
-                        ring.submitAndWait(1);
-                    }
+                    if (cqeCount > 0) ring.submit();
+                    else ring.submitAndWait(1);
                 }
             } catch (Exception e) {
-                System.err.println("[Worker Error] " + Thread.currentThread().getName() + ": " + e.getMessage());
                 e.printStackTrace();
             }
         }
 
         private void processEvent(IoUring ring, IoUring.Cqe cqe, MemoryArena arena) {
-            int idx = (int) cqe.userData;
-            int type = arena.getType(idx);
+            long rawUserData = cqe.userData;
+            int type = (int) (rawUserData >>> 32);
+            int idx = (int) (rawUserData & 0xFFFFFFFFL);
             int fd = arena.getFd(idx);
 
-            // 1. 处理 IO 错误
             if (cqe.res < 0) {
-                if (type == EVENT_ACCEPT) {
-                    // Accept 失败通常可恢复（如 ulimit 限制），重新提交
-                    addAccept(ring, serverFd, idx, arena);
-                } else {
-                    // 读写失败（连接重置/断开），关闭资源
-                    closeConnection(fd, idx, arena);
-                }
+                if (type == EVENT_ACCEPT) addAccept(ring, serverFd, idx);
+                else closeConnection(fd, idx, arena);
                 return;
             }
 
-            // 2. 状态机流转
             switch (type) {
                 case EVENT_ACCEPT -> {
-                    // A. 重新提交 Accept (保持监听)
-                    addAccept(ring, serverFd, idx, arena);
-
-                    // B. 处理新连接
                     int clientFd = cqe.res;
+                    addAccept(ring, serverFd, idx);
                     int readIdx = arena.allocate();
                     if (readIdx != -1) {
-                        // 注册 READ 事件
+                        arena.setFd(readIdx, clientFd);
                         addRead(ring, clientFd, readIdx, arena);
                     } else {
-                        // 内存池满，丢弃连接
                         new NativeSocket(clientFd).close();
                     }
                 }
                 case EVENT_READ -> {
-                    if (cqe.res == 0) { // EOF
+                    int bytesRead = cqe.res;
+                    if (bytesRead == 0) {
                         closeConnection(fd, idx, arena);
                     } else {
-                        // 收到请求 -> 转换为 WRITE (发送响应)
-                        addWrite(ring, fd, idx, arena);
+                        MemorySegment buffer = arena.getBuffer(idx);
+                        int safeLimit = (int) Math.min(bytesRead, buffer.byteSize());
+
+                        // 1. 扫描请求 (Byte-by-Byte)
+                        int requestCount = countRequestsSafely(buffer, safeLimit);
+                        REQ_IDENTIFIED.addAndGet(requestCount);
+
+                        // [DEBUG] 如果读取了大包(>2000字节)但只识别出1个，说明扫描有问题
+                        if (bytesRead > 2000 && requestCount == 1) {
+                            System.err.println("[WARN] Partial Scan Detected! Read: " + bytesRead + ", Found: " + requestCount);
+                        }
+
+                        // 2. 批量回写
+                        for (int i = 0; i < requestCount; i++) {
+                            addWrite(ring, fd, idx);
+                        }
+
+                        // 3. 续读
+                        addRead(ring, fd, idx, arena);
                     }
                 }
-                case EVENT_WRITE -> {
-                    // 发送完毕 -> 转换为 READ (Keep-Alive 等待下一个请求)
-                    addRead(ring, fd, idx, arena);
-                }
-                default -> System.err.println("Unknown event type: " + type);
+                case EVENT_WRITE -> {}
             }
+        }
+
+        /**
+         * 绝对安全的逐字节扫描
+         * 不受 CPU 大小端影响，不受内存对齐影响
+         */
+        private int countRequestsSafely(MemorySegment buffer, int length) {
+            if (length < 4) return 0;
+            int count = 0;
+
+            // 扫描整个缓冲区
+            for (long i = 0; i <= length - 4; i++) {
+                try {
+                    // 读取第一个字节
+                    byte b1 = buffer.get(ValueLayout.JAVA_BYTE, i);
+
+                    // 检查 "GET " (G=71, E=69, T=84, Space=32)
+                    if (b1 == 'G') {
+                        if (buffer.get(ValueLayout.JAVA_BYTE, i + 1) == 'E' &&
+                                buffer.get(ValueLayout.JAVA_BYTE, i + 2) == 'T' &&
+                                buffer.get(ValueLayout.JAVA_BYTE, i + 3) == ' ') {
+                            count++;
+                            i += 3; // 跳过
+                            continue;
+                        }
+                    }
+
+                    // 检查 "POST" (P=80, O=79, S=83, T=84)
+                    if (b1 == 'P') {
+                        if (buffer.get(ValueLayout.JAVA_BYTE, i + 1) == 'O' &&
+                                buffer.get(ValueLayout.JAVA_BYTE, i + 2) == 'S' &&
+                                buffer.get(ValueLayout.JAVA_BYTE, i + 3) == 'T') {
+                            count++;
+                            i += 3; // 跳过
+                            continue;
+                        }
+                    }
+
+                    // 检查 "PUT " (P=80, U=85, T=84, Space=32)
+                    if (b1 == 'P') {
+                        if (buffer.get(ValueLayout.JAVA_BYTE, i + 1) == 'U' &&
+                                buffer.get(ValueLayout.JAVA_BYTE, i + 2) == 'T' &&
+                                buffer.get(ValueLayout.JAVA_BYTE, i + 3) == ' ') {
+                            count++;
+                            i += 3;
+                            continue;
+                        }
+                    }
+
+                } catch (IndexOutOfBoundsException e) {
+                    break;
+                }
+            }
+            return Math.max(count, 1);
         }
 
         private void closeConnection(int fd, int idx, MemoryArena arena) {
@@ -191,39 +235,41 @@ public class ServerEngine {
             arena.free(idx);
         }
 
-        private void addAccept(IoUring r, int fd, int idx, MemoryArena arena) {
-            MemorySegment sqe = r.nextSqe();
-            if (sqe == null) return; // Should handle ring full
-
-            // 手动填充 SQE 以获得最佳性能
+        private void addAccept(IoUring r, int fd, int idx) {
+            MemorySegment sqe = getSqeStrict(r);
             sqe.fill((byte) 0);
             sqe.set(ValueLayout.JAVA_BYTE, NativeConstants.SQE_OFF_OPCODE, NativeConstants.IORING_OP_ACCEPT);
             sqe.set(ValueLayout.JAVA_INT, NativeConstants.SQE_OFF_FD, fd);
-
-            arena.setEventInfo(idx, EVENT_ACCEPT, fd);
-            sqe.set(ValueLayout.JAVA_LONG, NativeConstants.SQE_OFF_USER_DATA, idx);
+            long encodedUserData = ((long) EVENT_ACCEPT << 32) | (idx & 0xFFFFFFFFL);
+            sqe.set(ValueLayout.JAVA_LONG, NativeConstants.SQE_OFF_USER_DATA, encodedUserData);
         }
 
         private void addRead(IoUring r, int fd, int idx, MemoryArena arena) {
-            MemorySegment sqe = r.nextSqe();
-            if (sqe == null) return;
-
-            // 使用 io_uring wrapper (假设已封装 prepRead)
-            r.prepRead(sqe, fd, arena.getBuffer(idx), BasicConfig.getREAD_SZ(), 0);
-
-            arena.setEventInfo(idx, EVENT_READ, fd);
-            sqe.set(ValueLayout.JAVA_LONG, NativeConstants.SQE_OFF_USER_DATA, idx);
+            MemorySegment sqe = getSqeStrict(r);
+            r.prepRead(sqe, fd, arena.getBuffer(idx), ROBUST_READ_SZ, 0);
+            long encodedUserData = ((long) EVENT_READ << 32) | (idx & 0xFFFFFFFFL);
+            sqe.set(ValueLayout.JAVA_LONG, NativeConstants.SQE_OFF_USER_DATA, encodedUserData);
         }
 
-        private void addWrite(IoUring r, int fd, int idx, MemoryArena arena) {
-            MemorySegment sqe = r.nextSqe();
-            if (sqe == null) return;
-
-            // 零拷贝发送：直接使用 Shared Response Segment
+        private void addWrite(IoUring r, int fd, int idx) {
+            MemorySegment sqe = getSqeStrict(r);
             r.prepSend(sqe, fd, responseData, (int) responseData.byteSize(), 0);
+            long encodedUserData = ((long) EVENT_WRITE << 32) | (idx & 0xFFFFFFFFL);
+            sqe.set(ValueLayout.JAVA_LONG, NativeConstants.SQE_OFF_USER_DATA, encodedUserData);
+        }
 
-            arena.setEventInfo(idx, EVENT_WRITE, fd);
-            sqe.set(ValueLayout.JAVA_LONG, NativeConstants.SQE_OFF_USER_DATA, idx);
+        private MemorySegment getSqeStrict(IoUring r) {
+            MemorySegment sqe = r.nextSqe();
+            while (sqe == null) {
+                try {
+                    r.submit();
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+                sqe = r.nextSqe();
+                if (sqe == null) Thread.onSpinWait();
+            }
+            return sqe;
         }
     }
 }

@@ -11,12 +11,6 @@ import java.nio.file.Path;
 
 /**
  * Barrage Kernel 严格配置中心 (Unified)
- * <p>
- * 功能：
- * 1. 定义核心内核参数。
- * 2. 负责从 TOML 文件加载配置 (Load)。
- * 3. 负责将内存配置持久化回磁盘 (Save)。
- * 4. 严格的状态管理：禁止在初始化完成前访问。
  */
 @SuppressFBWarnings(value = "MS_SHOULD_BE_FINAL", justification = "Configuration must be injected at runtime")
 public class BasicConfig {
@@ -24,7 +18,7 @@ public class BasicConfig {
     // --- 状态与工具 ---
     private static boolean initialized = false;
     private static final TomlMapper mapper = new TomlMapper();
-    private static String configDir; // 记录配置目录位置
+    private static String configDir;
 
     // --- 配置字段 ---
     private static String ip;
@@ -32,6 +26,7 @@ public class BasicConfig {
     private static Integer serverThreads;
     private static Integer clientThreads;
     private static Integer connsPerClient;
+    private static Integer step; // 已添加字段
     private static Integer inFlight;
     private static Integer queueDepth;
     private static Integer batchSize;
@@ -39,27 +34,20 @@ public class BasicConfig {
     private static String activeTemplateName;
 
     // =================================================================================
-    // Part 1: 加载与持久化逻辑 (IO Operations)
+    // Part 1: 加载与持久化逻辑
     // =================================================================================
 
-    /**
-     * 从磁盘加载配置并初始化内核参数。
-     * 通常在系统启动的最早阶段调用。
-     */
     public static void load() {
         try {
-            // 1. 读取引导 path.toml 确定配置目录
             File bootstrap = new File("path.toml");
             if (!bootstrap.exists()) {
                 throw new RuntimeException("Bootstrap file 'path.toml' is missing!");
             }
 
             JsonNode bootstrapNode = mapper.readTree(bootstrap);
-            // 兼容 bootstrap 或 storage 标签
             JsonNode dirNode = bootstrapNode.has("bootstrap") ? bootstrapNode.get("bootstrap") : bootstrapNode.get("storage");
             configDir = getRequired(dirNode, "config_dir").asText();
 
-            // 2. 读取主配置 config.toml
             Path configPath = Path.of(configDir, "config.toml");
             File configFile = configPath.toFile();
             if (!configFile.exists()) {
@@ -78,6 +66,7 @@ public class BasicConfig {
             setSERVER_THREADS(getRequired(eng, "server_threads").asInt());
             setCLIENT_THREADS(getRequired(eng, "client_threads").asInt());
             setCONNS_PER_CLIENT(getRequired(eng, "conns_per_client").asInt());
+            setSTEP(getRequired(eng, "step").asInt()); // 补充加载逻辑
 
             // 5. 注入 Performance 参数
             JsonNode perf = root.path("performance");
@@ -90,46 +79,34 @@ public class BasicConfig {
             JsonNode tpl = root.path("template");
             setACTIVE_TEMPLATE_NAME(getRequired(tpl, "active").asText());
 
-            // 7. 锁定配置
             finishInitialization();
             System.out.println(">>> [Config] Kernel parameters strictly initialized from: " + configPath);
 
         } catch (Exception e) {
-            System.err.println(">>> [Config] FATAL: Configuration check failed!");
-            System.err.println(">>> Reason: " + e.getMessage());
-            System.exit(1); // 配置不全或错误，强制终止
+            System.err.println(">>> [Config] FATAL: Configuration check failed! Reason: " + e.getMessage());
+            System.exit(1);
         }
     }
 
-    /**
-     * 将当前内存中的配置持久化到 config.toml。
-     * 使用 PrintWriter 手动格式化以保持可读性。
-     */
     public static void save() {
-        checkReady(); // 确保内存中已有数据
+        checkReady();
         try {
-            if (configDir == null) {
-                // 如果未加载过（极其罕见），尝试重新读取 path.toml
-                load();
-            }
-
+            if (configDir == null) load();
             File configFile = Path.of(configDir, "config.toml").toFile();
 
             try (PrintWriter writer = new PrintWriter(new FileWriter(configFile))) {
-                // --- Network Section ---
                 writer.println("[network]");
                 writer.printf("ip = \"%s\"%n", getIP());
                 writer.printf("port = %d%n", getPORT());
                 writer.println();
 
-                // --- Engine Section ---
                 writer.println("[engine]");
                 writer.printf("server_threads = %d%n", getSERVER_THREADS());
                 writer.printf("client_threads = %d%n", getCLIENT_THREADS());
                 writer.printf("conns_per_client = %d%n", getCONNS_PER_CLIENT());
+                writer.printf("step = %d%n", getSTEP()); // 补充持久化逻辑
                 writer.println();
 
-                // --- Performance Section ---
                 writer.println("[performance]");
                 writer.printf("in_flight = %d%n", getIN_FLIGHT());
                 writer.printf("queue_depth = %d%n", getQUEUE_DEPTH());
@@ -137,11 +114,8 @@ public class BasicConfig {
                 writer.printf("read_sz = %d%n", getREAD_SZ());
                 writer.println();
 
-                // --- Template Section ---
                 writer.println("[template]");
                 writer.printf("active = \"%s\"%n", getACTIVE_TEMPLATE_NAME());
-
-                System.out.println(">>> [Config] Settings persisted nicely to: " + configFile.getAbsolutePath());
             }
         } catch (Exception e) {
             throw new RuntimeException("Persistence failed: " + e.getMessage());
@@ -159,13 +133,9 @@ public class BasicConfig {
     // Part 2: 状态管理与 Setter/Getter
     // =================================================================================
 
-    /**
-     * 锁定配置，表示加载完成。
-     */
     private static synchronized void finishInitialization() {
-        // 校验是否所有关键参数都已注入
         if (ip == null || port == null || serverThreads == null || clientThreads == null ||
-                connsPerClient == null || inFlight == null || queueDepth == null ||
+                connsPerClient == null || step == null || inFlight == null || queueDepth == null ||
                 batchSize == null || readSz == null || activeTemplateName == null) {
             throw new IllegalStateException("[FATAL] BasicConfig: Missing required fields during initialization!");
         }
@@ -173,22 +143,20 @@ public class BasicConfig {
     }
 
     private static void checkReady() {
-        if (!initialized) {
-            throw new IllegalStateException("[FATAL] BasicConfig accessed before ConfigLoader completed!");
-        }
+        if (!initialized) throw new IllegalStateException("[FATAL] BasicConfig accessed before initialized!");
     }
 
-    // --- 全量 Set 接口 (保留 public 以支持动态调整或测试) ---
+    // --- Set 接口 ---
 
     public static void setIP(String val) { ip = val; }
     public static void setPORT(int val) { port = val; }
     public static void setSERVER_THREADS(int val) { serverThreads = val; }
     public static void setCLIENT_THREADS(int val) { clientThreads = val; }
     public static void setCONNS_PER_CLIENT(int val) { connsPerClient = val; }
+    public static void setSTEP(int val) { step = val; } // 补充 Setter
     public static void setIN_FLIGHT(int val) { inFlight = val; }
 
     public static void setQUEUE_DEPTH(int val) {
-        // 增加 io_uring 专用的对齐校验
         if (val <= 0 || (val & (val - 1)) != 0) {
             throw new IllegalArgumentException("QUEUE_DEPTH must be a power of 2 and > 0");
         }
@@ -199,13 +167,14 @@ public class BasicConfig {
     public static void setREAD_SZ(int val) { readSz = val; }
     public static void setACTIVE_TEMPLATE_NAME(String val) { activeTemplateName = val; }
 
-    // --- 全量 Get 接口 ---
+    // --- Get 接口 ---
 
     public static String getIP() { checkReady(); return ip; }
     public static int getPORT() { checkReady(); return port; }
     public static int getSERVER_THREADS() { checkReady(); return serverThreads; }
     public static int getCLIENT_THREADS() { checkReady(); return clientThreads; }
     public static int getCONNS_PER_CLIENT() { checkReady(); return connsPerClient; }
+    public static int getSTEP() { checkReady(); return step; } // 补充 Getter
     public static int getIN_FLIGHT() { checkReady(); return inFlight; }
     public static int getQUEUE_DEPTH() { checkReady(); return queueDepth; }
     public static int getBATCH_SIZE() { checkReady(); return batchSize; }
@@ -214,10 +183,6 @@ public class BasicConfig {
 
     public static String getConfigDir() { checkReady(); return configDir; }
 
-    /**
-     * 兼容性方法：原子更新目标地址和端口。
-     * 供测试环境或动态切换目标服务使用。
-     */
     public static synchronized void updateEndpoint(String newIp, int newPort) {
         setIP(newIp);
         setPORT(newPort);

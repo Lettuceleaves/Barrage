@@ -27,7 +27,8 @@ public class ClientEngine {
     private final String targetIp;
     private final int targetPort;
     private final int threads;
-    private final long totalTargetQps;
+    private final long totalTargetQps;      // 配置的上限 (天花板)
+    private volatile long currentTargetQps; // 当前实时限速 (从 0 开始)
 
     // 统计计数器
     private final LongAdder respCounter;
@@ -51,6 +52,7 @@ public class ClientEngine {
         this.targetPort = targetPort;
         this.threads = threads;
         this.totalTargetQps = targetQps;
+        this.currentTargetQps = 0;
         this.respCounter = respCounter;
         this.sentCounter = sentCounter;
         this.requestTemplate = requestTemplate;
@@ -58,6 +60,18 @@ public class ClientEngine {
 
         // 在启动前，将模版数据“固化”到堆外内存
         prepareBatchedRequest();
+    }
+
+    public void setCurrentTargetQps(long qps) {
+        this.currentTargetQps = qps;
+    }
+
+    public long getCurrentTargetQps() {
+        return currentTargetQps;
+    }
+
+    public long getTotalTargetQps() {
+        return totalTargetQps;
     }
 
     /**
@@ -141,9 +155,16 @@ public class ClientEngine {
                     double deltaSec = (now - lastTime) / 1_000_000_000.0;
                     lastTime = now;
 
-                    tokens += deltaSec * targetQps;
-                    double maxBurst = targetQps * 0.1; // 允许 100ms 的突发
-                    if (tokens > maxBurst) tokens = maxBurst;
+                    long threadLimit = currentTargetQps / threads;
+
+                    if (threadLimit > 0) {
+                        tokens += deltaSec * threadLimit;
+                        // 允许一小段突发，防止调度抖动
+                        double maxBurst = Math.max(batchSize * 2, threadLimit * 0.1);
+                        if (tokens > maxBurst) tokens = maxBurst;
+                    } else {
+                        tokens = 0; // 如果 limit 为 0，清空令牌
+                    }
 
                     // --- Phase B: 发送请求 (Write) ---
                     for (int i = 0; i < conns; i++) {

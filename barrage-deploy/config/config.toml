@@ -6,13 +6,13 @@ port = 8089
 server_threads = 6
 client_threads = 6
 conns_per_client = 8
-step = 100000
+step = 1000
 
 [performance]
 in_flight = 64
 queue_depth = 4096
 batch_size = 16
-read_sz = 16384
+read_sz = 1024
 
 [template]
 active = "Upload Data"

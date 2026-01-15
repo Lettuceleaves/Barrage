@@ -53,7 +53,7 @@ public class BenchmarkWizard implements Ansi {
         // --- 2. 运行时参数 ---
         t.line();
         t.info("Step 2: Runtime Parameters");
-        long qps = t.readLong("Target QPS (0 for max)", 0);
+        long qps = t.readLong("Target QPS", 10000);
 
         // --- 3. 最终确认回显 ---
         t.clear();
@@ -64,7 +64,7 @@ public class BenchmarkWizard implements Ansi {
             t.info("  Template : " + CYAN + sourceValue + RESET);
             t.info("  Payload  : " + CYAN + msgSize + " bytes" + RESET);
         }
-        t.info("  Limit    : " + CYAN + (qps == 0 ? "Unlimited" : qps + " QPS") + RESET);
+        t.info("  Limit    : " + CYAN + (qps + " QPS") + RESET);
         t.line();
 
         String confirm = t.readOption("Launch Attack? (Y/n)", "Y", "Y", "n", "y", "N");

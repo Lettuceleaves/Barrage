@@ -34,6 +34,10 @@ WORKDIR /app
 # 这里的 app.jar 是由 run.sh 脚本从子模块 target 拷贝过来的
 COPY app.jar /app/app.jar
 
+COPY path.toml /app/path.toml
+
+COPY config /app/config
+
 # 声明端口
 EXPOSE 8080-8180
 

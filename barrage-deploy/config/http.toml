@@ -1,0 +1,19 @@
+[[templates]]
+name = "Health Check"
+method = "GET"
+path = "/health"
+body = ""
+headers = "User-Agent:Barrage-Bench"
+
+[[templates]]
+name = "User Login"
+method = "POST"
+path = "/api/v1/login"
+body = '{"username":"admin", "password":"123"}'
+headers = "Content-Type:application/json"
+
+[[templates]]
+name = "Upload Data"
+method = "PUT"
+path = "/api/upload"
+body = "raw_binary_data_placeholder"
