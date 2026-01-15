@@ -4,58 +4,102 @@ import com.barrage.cli.interaction.Ansi;
 import com.barrage.cli.interaction.ExecutionMode;
 import com.barrage.cli.interaction.Terminal;
 import com.barrage.cli.model.LaunchContext;
-import com.barrage.kernel.config.BasicConfig;
+import com.barrage.kernel.config.basic.BasicConfig;
+import com.barrage.kernel.config.template.TemplateConfig;
+import com.barrage.protocol.HTTP.HttpTemplate;
 import com.barrage.protocol.datasource.DataSourceType;
 
+import java.util.List;
+
 /**
- * 模式 1: 交互式基准测试向导 (已精简，仅限压力测试模式)
+ * 模式 1: 交互式压测启动器
+ * <p>
+ * 简化模式：
+ * 1. FILE: 从当前选中的 http.toml 模板加载。
+ * 2. CONSOLE: 启动后在控制台手动输入字段。
  */
 public class BenchmarkWizard implements Ansi {
 
-    private static final String DEFAULT_FILE = "tmp/http_request.txt";
-
     public static LaunchContext run(Terminal t) {
-        t.section(BLUE + "Stress Test Configuration" + RESET);
+        t.clear();
+        t.section(BLUE + "Benchmark Launch Wizard" + RESET);
 
-        // --- 1. 网络参数配置 (直接配置目标，不再询问拓扑) ---
-        t.info("Target Mode: " + YELLOW + "Client Only (Remote/External Target)" + RESET);
-
-        String ip = t.readString("Enter Target IP", "127.0.0.1");
-        int port = t.readInt("Enter Port", 8080);
-
-        // 同管同步全局配置
-        BasicConfig.setIP(ip);
-        BasicConfig.setPORT(port);
-
-        // --- 2. 数据源配置 ---
-        t.section(BLUE + "Data Source Selection" + RESET);
-        t.info(YELLOW + "1. FILE" + RESET + "    (Path: " + DEFAULT_FILE + ")");
-        t.info(YELLOW + "2. CONSOLE" + RESET + " (Manual Input)");
+        // --- 1. 选择数据源加载方式 ---
+        t.info("Step 1: Select Message Source");
+        t.info("  1. " + CYAN + "Template Mode" + RESET + " (From http.toml: " + BasicConfig.getACTIVE_TEMPLATE_NAME() + ")");
+        t.info("  2. " + CYAN + "Manual Mode" + RESET + "   (Interactive console input)");
+        t.line();
 
         String sourceChoice = t.readOption("Select Source", "1", "1", "2");
 
-        DataSourceType sourceType;
+        DataSourceType selectedType;
         String sourceValue;
+        long msgSize = 0;
 
-        if ("2".equals(sourceChoice)) {
-            sourceType = DataSourceType.CONSOLE;
-            sourceValue = "Enter HTTP Request Header (Empty line to finish): ";
+        if (sourceChoice.equals("1")) {
+            // A. FILE 模式：绑定到当前活跃模板
+            selectedType = DataSourceType.FILE;
+            sourceValue = BasicConfig.getACTIVE_TEMPLATE_NAME();
+
+            // 预览报文大小
+            HttpTemplate temp = loadActiveTemplate(sourceValue, BasicConfig.getIP(), BasicConfig.getPORT());
+            msgSize = temp.toBytes().length;
         } else {
-            sourceType = DataSourceType.FILE;
-            sourceValue = DEFAULT_FILE;
+            // B. CONSOLE 模式：手动输入
+            selectedType = DataSourceType.CONSOLE;
+            sourceValue = "MANUAL_BUILD"; // 仅作标识
         }
 
-        t.info("\n>>> Configuration Completed. " + GREEN + "Launching Engine..." + RESET);
+        // --- 2. 运行时参数 ---
+        t.line();
+        t.info("Step 2: Runtime Parameters");
+        long qps = t.readLong("Target QPS (0 for max)", 0);
 
-        // 这里的 startInternalServer 固定为 false
-        // 在向导结束返回时
+        // --- 3. 最终确认回显 ---
+        t.clear();
+        t.section(YELLOW + "Confirm Mission Parameters" + RESET);
+        t.info("  Target   : " + GREEN + BasicConfig.getIP() + ":" + BasicConfig.getPORT() + RESET);
+        t.info("  Mode     : " + CYAN + (selectedType == DataSourceType.FILE ? "Template" : "Manual Builder") + RESET);
+        if (selectedType == DataSourceType.FILE) {
+            t.info("  Template : " + CYAN + sourceValue + RESET);
+            t.info("  Payload  : " + CYAN + msgSize + " bytes" + RESET);
+        }
+        t.info("  Limit    : " + CYAN + (qps == 0 ? "Unlimited" : qps + " QPS") + RESET);
+        t.line();
+
+        String confirm = t.readOption("Launch Attack? (Y/n)", "Y", "Y", "n", "y", "N");
+        if ("n".equalsIgnoreCase(confirm)) return null;
+
+        t.info("\n>>> Initializing Engine..." + RESET);
+
+        // --- 4. 构建启动上下文 ---
+        // 重要：确保 LaunchContext 构造函数接收 qps (long)
         return new LaunchContext(
-                true,
-                ExecutionMode.STRESS_TEST, // BenchmarkWizard 现在只做压测
-                ip,
-                port,
-                sourceType,
-                sourceValue
+                ExecutionMode.STRESS_TEST,
+                BasicConfig.getIP(),
+                BasicConfig.getPORT(),
+                selectedType,
+                sourceValue,
+                qps
         );
+    }
+
+    private static HttpTemplate loadActiveTemplate(String templateName, String ip, int port) {
+        HttpTemplate tpl = new HttpTemplate();
+        tpl.setHost(ip);
+        tpl.setPort(port);
+        if (templateName == null) {
+            tpl.setMethod("GET");
+            tpl.setPath("/");
+            return tpl;
+        }
+        List<String> details = TemplateConfig.get(templateName);
+        if (details != null && details.size() >= 4) {
+            tpl.setMethod(details.get(0));
+            tpl.setPath(details.get(1));
+            tpl.setBody(details.get(2));
+            tpl.setHeaders(details.get(3));
+        }
+        return tpl;
     }
 }

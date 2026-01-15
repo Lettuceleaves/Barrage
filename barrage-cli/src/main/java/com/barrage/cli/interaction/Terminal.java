@@ -6,13 +6,21 @@ import java.util.HashSet;
 import java.util.Scanner;
 import java.util.Set;
 
+/**
+ * 终端交互工具类
+ * 扩展了成功、错误反馈以及流程控制方法
+ */
 public class Terminal implements AutoCloseable {
     private final Scanner scanner;
-    private static final String ANSI_RESET = "\033[0m";
-    private static final String ANSI_YELLOW = "\033[33m"; // 黄色警告
+
+    // ANSI 颜色常量
+    private static final String RESET = "\033[0m";
+    private static final String RED = "\033[31m";
+    private static final String GREEN = "\033[32m";
+    private static final String YELLOW = "\033[33m";
+    private static final String BLUE = "\033[34m";
 
     public Terminal() {
-        // 显式使用 UTF-8 防止中文乱码
         this.scanner = new Scanner(System.in, StandardCharsets.UTF_8);
     }
 
@@ -21,27 +29,63 @@ public class Terminal implements AutoCloseable {
     }
 
     public void warn(String message) {
-        System.out.println(ANSI_YELLOW + "[WARN] " + message + ANSI_RESET);
+        System.out.println(YELLOW + "[WARN] " + message + RESET);
+    }
+
+    public void error(String message) {
+        System.out.println(RED + "[ERROR] " + message + RESET);
+    }
+
+    public void success(String message) {
+        System.out.println(GREEN + "[SUCCESS] " + message + RESET);
     }
 
     public void section(String title) {
-        System.out.println("\n[" + title + "]");
+        System.out.println("\n" + title);
+    }
+
+    public void line() {
+        System.out.println("--------------------------------------------------");
+    }
+
+    /**
+     * 清屏效果（通过打印换行符或 ANSI 转义序列）
+     */
+    public void clear() {
+        System.out.print("\033[H\033[2J");
+        System.out.flush();
+    }
+
+    /**
+     * 暂停流程，等待用户按回车继续
+     */
+    public void pause() {
+        System.out.print("\nPress Enter to continue...");
+        if (scanner.hasNextLine()) {
+            scanner.nextLine();
+        }
     }
 
     /**
      * 核心基础方法：读取字符串
      */
     public String readString(String prompt, String defaultValue) {
-        System.out.printf("%s (Default: %s): ", prompt, defaultValue);
+        System.out.printf("%s %s[%s]%s: ", BLUE + prompt + RESET, YELLOW, defaultValue, RESET);
         String input = scanner.hasNextLine() ? scanner.nextLine().trim() : "";
         return input.isEmpty() ? defaultValue : input;
     }
 
     /**
-     * [新增] ask 方法
-     * readString 的别名，为了适配 EngineBootstrap 中的调用
+     * 别名方法，适配现有调用
      */
     public String ask(String prompt, String defaultValue) {
+        return readString(prompt, defaultValue);
+    }
+
+    /**
+     * 别名方法，专门用于读取普通输入
+     */
+    public String readInput(String prompt, String defaultValue) {
         return readString(prompt, defaultValue);
     }
 
@@ -56,9 +100,6 @@ public class Terminal implements AutoCloseable {
         }
     }
 
-    /**
-     * [新增] 读取长整型 (用于 QPS 等大数值)
-     */
     public long readLong(String prompt, long defaultValue) {
         while (true) {
             String input = readString(prompt, String.valueOf(defaultValue));
@@ -86,6 +127,6 @@ public class Terminal implements AutoCloseable {
 
     @Override
     public void close() {
-        // 通常不关闭 System.in，以免后续无法重新读取
+        // System.in 通常不关闭
     }
 }

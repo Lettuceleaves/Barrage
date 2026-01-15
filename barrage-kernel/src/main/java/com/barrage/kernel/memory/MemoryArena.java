@@ -1,6 +1,6 @@
 package com.barrage.kernel.memory;
 
-import com.barrage.kernel.config.BasicConfig;
+import com.barrage.kernel.config.basic.BasicConfig;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;

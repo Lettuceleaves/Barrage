@@ -1,0 +1,17 @@
+[network]
+ip = "host.docker.internal"
+port = 8089
+
+[engine]
+server_threads = 6
+client_threads = 6
+conns_per_client = 8
+
+[performance]
+in_flight = 64
+queue_depth = 4096
+batch_size = 16
+read_sz = 1024
+
+[template]
+active = "Upload Data"

@@ -1,26 +1,30 @@
 package com.barrage.cli;
 
 import com.barrage.cli.bootstrap.EngineBootstrap;
+import com.barrage.cli.interaction.pages.Banner;
 import com.barrage.cli.interaction.pages.Home;
 import com.barrage.cli.interaction.Terminal;
 import com.barrage.cli.model.LaunchContext;
+import com.barrage.kernel.config.basic.BasicConfig;
 
 public class Main {
 
     public static void main(String[] args) {
+        // --- 0. 引导阶段 (Bootstrap) ---
+        // 必须在任何业务逻辑之前加载 TOML 配置
+        // 如果 path.toml 或 config.toml 不存在，内部会 System.exit(1)
+
         // 使用 try-with-resources 确保控制台资源正确管理
         try (Terminal terminal = new Terminal()) {
 
+            Banner.print(terminal);
+            BasicConfig.load();
+
             // 1. 进入交互式主页 (Home)
-            // 获取启动上下文 (包含配置参数，但不包含重资源对象)
+            // 此时 BasicConfig 已被 TOML 填充，Home 可以安全地读取配置并展示给用户
             LaunchContext ctx = Home.open(terminal);
 
-            // 2. 如果用户选择运行 (非退出)
-            if (ctx.shouldRun()) {
-                // 3. 将启动逻辑委托给 Bootstrap
-                // 这里才开始真正的内存分配和引擎启动
-                EngineBootstrap.run(terminal, ctx);
-            }
+            EngineBootstrap.run(terminal, ctx);
 
         } catch (Exception e) {
             System.err.println("\n[FATAL ERROR] Engine crashed: " + e.getMessage());

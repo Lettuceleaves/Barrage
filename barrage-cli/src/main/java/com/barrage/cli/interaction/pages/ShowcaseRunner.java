@@ -4,42 +4,44 @@ import com.barrage.cli.interaction.Ansi;
 import com.barrage.cli.interaction.ExecutionMode;
 import com.barrage.cli.interaction.Terminal;
 import com.barrage.cli.model.LaunchContext;
-import com.barrage.kernel.config.BasicConfig;
+import com.barrage.kernel.config.basic.BasicConfig;
 import com.barrage.protocol.datasource.DataSourceType;
 
 /**
- * 模式 2: 快速演示模式 (使用默认值)
+ * 模式 2: 快速演示模式 (Showcase)
+ * <p>
+ * 职责：使用当前配置的默认值快速启动全套流程（内置 Server + Client）。
+ * 逻辑：直接读取 BasicConfig 中的 Target 和 Active Template。
  */
 public class ShowcaseRunner implements Ansi {
 
-    private static final String DEFAULT_FILE = "tmp/http_request.txt";
-
     public static LaunchContext run(Terminal t) {
+        t.clear();
         t.section(BLUE + "Showcase Mode Initialization" + RESET);
 
-        // 1. 定义默认值
-        String ip = "127.0.0.1";
-        int port = 8080;
-        String filePath = DEFAULT_FILE;
+        // 1. 从全局配置获取当前状态
+        String ip = BasicConfig.getIP();
+        int port = BasicConfig.getPORT();
+        String activeTemplate = BasicConfig.getACTIVE_TEMPLATE_NAME();
 
-        t.info(">> Target: " + YELLOW + ip + ":" + port + RESET);
-        t.info(">> Mode:   " + YELLOW + "Internal Server + Client" + RESET);
-        t.info(">> Data:   " + YELLOW + filePath + RESET);
+        // 2. 界面回显
+        t.info(">> Environment: " + YELLOW + "Self-Benchmark (Internal Server + Client)" + RESET);
+        t.info(">> Target     : " + CYAN + ip + ":" + port + RESET);
+        t.info(">> Template   : " + CYAN + (activeTemplate != null ? activeTemplate : "Default") + RESET);
+        t.line();
 
-        // 2. 同步全局配置
-        BasicConfig.setIP(ip);
-        BasicConfig.setPORT(port);
+        t.info(">>> " + GREEN + "Showcase parameters locked. Auto-Launching..." + RESET);
 
-        t.info("\n>>> Defaults applied. " + GREEN + "Auto-Launching Engine..." + RESET);
-
-        // 在 Showcase 返回时
+        // 3. 构建启动上下文
+        // 注意：ExecutionMode.SELF_BENCHMARK 会触发内置服务器的启动
+        // QPS 默认为 0 (无限制)，确保 LaunchContext 构造函数已适配 long 类型的 Qps
         return new LaunchContext(
-                true,
-                ExecutionMode.SELF_BENCHMARK, // Showcase 模式启动全套
-                "127.0.0.1",
-                8080,
-                DataSourceType.FILE,
-                DEFAULT_FILE
+                ExecutionMode.SELF_BENCHMARK,  // 模式：自压测模式
+                ip,
+                port,
+                DataSourceType.FILE,           // DataSourceType.FILE 对应模板加载逻辑
+                activeTemplate,                // 传递当前模板名称
+                200000L                             // QPS: 0 (全速)
         );
     }
 }
