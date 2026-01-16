@@ -6,7 +6,9 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 import java.io.File;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 /**
@@ -119,7 +121,7 @@ public class BasicConfig {
             finishInitialization();
             System.out.println(">>> [Config] Kernel parameters strictly initialized from: " + configPath);
 
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             System.err.println(">>> [Config] FATAL: Configuration check failed! Reason: " + e.getMessage());
             System.exit(1);
         }
@@ -139,7 +141,7 @@ public class BasicConfig {
             if (configDir == null) load();
             File configFile = Path.of(configDir, "config.toml").toFile();
 
-            try (PrintWriter writer = new PrintWriter(new FileWriter(configFile))) {
+            try (PrintWriter writer = new PrintWriter(new FileWriter(configFile, StandardCharsets.UTF_8))) {
                 writer.println("[network]");
                 writer.printf("ip = \"%s\"%n", getIP());
                 writer.printf("port = %d%n", getPORT());
@@ -162,7 +164,7 @@ public class BasicConfig {
                 writer.println("[template]");
                 writer.printf("active = \"%s\"%n", getACTIVE_TEMPLATE_NAME());
             }
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             throw new RuntimeException("Persistence failed: " + e.getMessage());
         }
     }

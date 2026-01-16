@@ -261,7 +261,7 @@ public class EngineBootstrap implements Ansi {
                 // 辅助状态：显示当前是在 爬坡(Climbing) 还是 保持(Holding)
                 String phase = (totalTargetQps > 0 && nextLoad < totalTargetQps) ? "📈" : "🏁";
 
-                System.out.printf("[MONITOR] %s Load:%-9d | Sent:%-9d | Recv:%-9d | Latency:%-6.2fms | %s\n",
+                System.out.printf("[MONITOR] %s Load:%-9d | Sent:%-9d | Recv:%-9d | Latency:%-6.2fms | %s%n",
                         phase, nextLoad, realSent, realRecv, avgLat, healthStatus);
             }
         }, "monitor-thread");

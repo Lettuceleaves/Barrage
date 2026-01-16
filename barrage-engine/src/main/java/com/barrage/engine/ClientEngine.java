@@ -6,6 +6,7 @@ import com.barrage.kernel.io.NativeConstants;
 import com.barrage.kernel.io.NativeSocket;
 import com.barrage.kernel.memory.MemoryArena;
 import com.barrage.protocol.HTTP.HttpTemplate;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 import java.io.IOException;
 import java.lang.foreign.Arena;
@@ -46,17 +47,23 @@ import java.util.concurrent.atomic.LongAdder;
  * @since 2026/1/6
  * @see IoUring
  */
-public class ClientEngine {
+@SuppressFBWarnings(value = "CT_CONSTRUCTOR_THROW", justification = "Class is final, preventing finalizer attacks")
+public final class ClientEngine {
     private final String targetIp;
     private final int targetPort;
     private final int threads;
     private final long totalTargetQps;
     private volatile long currentTargetQps;
 
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Shared LongAdder ref required for external monitoring")
     private final LongAdder respCounter;
+
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Shared LongAdder ref required for external monitoring")
     private final LongAdder sentCounter;
+
     private final LongAdder totalLatencyMicros = new LongAdder();
 
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Zero-copy requirement; internal bytes are trusted")
     private final HttpTemplate requestTemplate;
     private final int batchSize;
     private final Arena globalArena = Arena.ofShared();
@@ -225,6 +232,7 @@ public class ClientEngine {
          * </ol>
          */
         @Override
+        @SuppressFBWarnings(value = "REC_CATCH_EXCEPTION", justification = "Worker thread must not die silently; generic catch is the safety net")
         public void run() {
             try (Arena arena = Arena.ofConfined();
                  IoUring ring = new IoUring(BasicConfig.getQUEUE_DEPTH())) {

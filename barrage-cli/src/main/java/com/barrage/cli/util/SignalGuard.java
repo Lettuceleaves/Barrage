@@ -1,5 +1,6 @@
 package com.barrage.cli.util;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import sun.misc.Signal;
 import sun.misc.SignalHandler;
 
@@ -28,7 +29,8 @@ import sun.misc.SignalHandler;
  * @version 1.0
  * @since 2026/1/6
  */
-public class SignalGuard implements AutoCloseable {
+@SuppressFBWarnings(value = "CT_CONSTRUCTOR_THROW", justification = "Class is final, preventing finalizer attacks")
+public final class SignalGuard implements AutoCloseable {
 
     /**
      * 持有在此守卫激活之前的旧信号处理器。

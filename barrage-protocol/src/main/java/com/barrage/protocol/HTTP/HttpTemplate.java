@@ -1,6 +1,7 @@
 package com.barrage.protocol.HTTP;
 
 import com.barrage.kernel.config.basic.BasicConfig;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Set;
@@ -52,7 +53,7 @@ public class HttpTemplate {
      * @param rawBytes 完整的 HTTP 请求报文（包含 Header 和 Body）的字节数组
      */
     public HttpTemplate(byte[] rawBytes) {
-        this.rawBytes = rawBytes;
+        this.rawBytes = rawBytes != null ? rawBytes.clone() : null;
     }
 
     // --- 模式 B: 动态字段支持 ---
@@ -93,6 +94,7 @@ public class HttpTemplate {
      *
      * @return 准备好写入 Socket 的 HTTP 请求字节数组
      */
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP", justification = "Performance-critical path, avoiding unnecessary array copy")
     public byte[] toBytes() {
         // 1. 如果是 Raw 模式（文件源），直接返回原生数据
         if (rawBytes != null) {
