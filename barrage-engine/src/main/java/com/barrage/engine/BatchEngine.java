@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.LongAdder;
 /**
  * 基于 {@code io_uring} 的高性能 HTTP 流量生成引擎 (Client Engine)。
  * <p>
- * 该类是 Barrage 压测端的核心驱动器，负责管理一组独立的工作线程 ({@link ClientWorker})，
+ * 该类是 Barrage 压测端的核心驱动器，负责管理一组独立的工作线程 ({@link BatchWorker})，
  * 通过异步非阻塞 I/O 向目标服务器发起高频攻击。每个工作线程都维护独立的 {@code io_uring} 实例
  * 和连接池，实现了完全无锁的 Thread-Per-Core 架构。
  *
@@ -48,7 +48,7 @@ import java.util.concurrent.atomic.LongAdder;
  * @see IoUring
  */
 @SuppressFBWarnings(value = "CT_CONSTRUCTOR_THROW", justification = "Class is final, preventing finalizer attacks")
-public final class ClientEngine {
+public final class BatchEngine {
     private final String targetIp;
     private final int targetPort;
     private final int threads;
@@ -84,10 +84,10 @@ public final class ClientEngine {
      * @param requestTemplate HTTP 请求模板，将用于生成批量请求数据
      * @throws RuntimeException 如果目标主机名无法解析
      */
-    public ClientEngine(String targetHost, int targetPort, int threads,
-                        long targetQps,
-                        LongAdder respCounter, LongAdder sentCounter,
-                        HttpTemplate requestTemplate) {
+    public BatchEngine(String targetHost, int targetPort, int threads,
+                       long targetQps,
+                       LongAdder respCounter, LongAdder sentCounter,
+                       HttpTemplate requestTemplate) {
         try {
             this.targetIp = InetAddress.getByName(targetHost).getHostAddress();
         } catch (Exception e) {
@@ -144,7 +144,7 @@ public final class ClientEngine {
     /**
      * 启动引擎。
      * <p>
-     * 创建并启动指定数量的 {@link ClientWorker} 线程。每个线程被绑定为系统线程，
+     * 创建并启动指定数量的 {@link BatchWorker} 线程。每个线程被绑定为系统线程，
      * 并被赋予初始的 QPS 配额。
      */
     public void start() {
@@ -152,7 +152,7 @@ public final class ClientEngine {
         // 这里的 qpsPerThread 只是个初始参考值，实际运行中会动态计算
         long qpsPerThread = Math.max(1, totalTargetQps / threads);
         for (int i = 0; i < threads; i++) {
-            Thread t = new Thread(new ClientWorker(qpsPerThread), "client-worker-" + i);
+            Thread t = new Thread(new BatchWorker(qpsPerThread), "client-worker-" + i);
             workers.add(t);
             t.start();
         }
@@ -187,7 +187,7 @@ public final class ClientEngine {
      * 每个 Worker 独占一个 {@code io_uring} 实例，维护固定数量的长连接。
      * 核心逻辑是一个基于令牌桶的 Event Loop。
      */
-    private class ClientWorker implements Runnable {
+    private class BatchWorker implements Runnable {
         private final long initialTargetQps;
         private final boolean[] isWritePending;
         private final int[] writeIndices;
@@ -208,7 +208,7 @@ public final class ClientEngine {
         // "HTTP" (ASCII) in Little Endian integer
         private static final int HTTP_HEADER_INT = 0x50545448;
 
-        ClientWorker(long targetQps) {
+        BatchWorker(long targetQps) {
             this.initialTargetQps = targetQps;
             int capacity = BasicConfig.getCONNS_PER_CLIENT() + 16;
             this.isWritePending = new boolean[capacity];

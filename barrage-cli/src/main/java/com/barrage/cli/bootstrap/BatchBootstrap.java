@@ -5,7 +5,7 @@ import com.barrage.cli.interaction.ExecutionMode;
 import com.barrage.cli.interaction.Terminal;
 import com.barrage.cli.model.LaunchContext;
 import com.barrage.cli.util.SignalGuard;
-import com.barrage.engine.ClientEngine;
+import com.barrage.engine.BatchEngine;
 import com.barrage.engine.ServerEngine;
 import com.barrage.kernel.config.basic.BasicConfig;
 import com.barrage.kernel.config.template.TemplateConfig;
@@ -47,7 +47,7 @@ import java.util.concurrent.atomic.LongAdder;
  * @version 1.0
  * @since 2026/1/6
  */
-public class EngineBootstrap implements Ansi {
+public class BatchBootstrap implements Ansi {
 
     /**
      * 实时接收 QPS 计数器 (全局累加)。
@@ -89,7 +89,7 @@ public class EngineBootstrap implements Ansi {
         SHUTDOWN_FUTURE.set(new CompletableFuture<>());
 
         Thread mainThread = Thread.currentThread();
-        AtomicReference<ClientEngine> clientRef = new AtomicReference<>();
+        AtomicReference<BatchEngine> clientRef = new AtomicReference<>();
         AtomicReference<ServerEngine> serverRef = new AtomicReference<>();
 
         Runnable shutdownTask = () -> {
@@ -98,7 +98,7 @@ public class EngineBootstrap implements Ansi {
 
             System.out.println("\n>>> 🛑 Stopping..."); // 简化日志
 
-            ClientEngine client = clientRef.get();
+            BatchEngine client = clientRef.get();
             ServerEngine server = serverRef.get();
 
             CompletableFuture<Void> stopClient = CompletableFuture.runAsync(() -> { if (client != null) client.shutdown(); });
@@ -130,7 +130,7 @@ public class EngineBootstrap implements Ansi {
                 targetIp = "127.0.0.1";
             }
 
-            ClientEngine engine = new ClientEngine(targetIp, ctx.getPort(), BasicConfig.getCLIENT_THREADS(), 0, RECV_QPS, SENT_QPS, template);
+            BatchEngine engine = new BatchEngine(targetIp, ctx.getPort(), BasicConfig.getCLIENT_THREADS(), 0, RECV_QPS, SENT_QPS, template);
             clientRef.set(engine);
             startDiagnosticMonitor(t, engine, ctx.getQps());
             setupGcDetector();
@@ -202,7 +202,7 @@ public class EngineBootstrap implements Ansi {
      * @param engine         客户端引擎实例
      * @param totalTargetQps 用户设定的最大目标 QPS
      */
-    private static void startDiagnosticMonitor(Terminal t, ClientEngine engine, long totalTargetQps) {
+    private static void startDiagnosticMonitor(Terminal t, BatchEngine engine, long totalTargetQps) {
         Thread monitor = new Thread(() -> {
             long lastRecv = 0, lastSent = 0, lastTotalLatency = 0, lastTime = System.nanoTime();
             int step = BasicConfig.getSTEP();

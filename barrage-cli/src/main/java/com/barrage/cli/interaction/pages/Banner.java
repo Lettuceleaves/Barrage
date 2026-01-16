@@ -48,7 +48,7 @@ public class Banner implements Ansi {
 
         t.info("==================================================================");
         t.info("   " + CYAN + "Barrage Kernel" + RESET + ": True Zero-GC IoUring Engine");
-        t.info("   Version: " + YELLOW + "1.3" + RESET + " | Java 25 FFM API");
+        t.info("   Version: " + YELLOW + "1.0" + RESET + " | Java 25 FFM API");
         t.info("==================================================================");
     }
 }
