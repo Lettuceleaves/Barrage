@@ -125,26 +125,63 @@ public class EngineBootstrap implements Ansi {
         Thread monitor = new Thread(() -> {
             long lastRecv = 0, lastSent = 0, lastTotalLatency = 0, lastTime = System.nanoTime();
             int step = BasicConfig.getSTEP();
+
             while (IS_RUNNING.get() && !Thread.currentThread().isInterrupted()) {
                 try { Thread.sleep(1000); } catch (InterruptedException e) { break; }
                 if (!IS_RUNNING.get()) break;
-                long currRecv = RECV_QPS.sum(), currSent = SENT_QPS.sum();
+
+                // ==========================================
+                // 1. 数据采集 (Data Collection)
+                // ==========================================
+                long currRecv = RECV_QPS.sum();
+                long currSent = SENT_QPS.sum();
                 long currTotalLatency = engine.getTotalLatencyMicros();
                 long currTime = System.nanoTime();
                 long deltaUs = (currTime - lastTime) / 1000;
                 if (deltaUs <= 0) continue;
-                long realRecv = (currRecv - lastRecv) * 1000000 / deltaUs;
-                long realSent = (currSent - lastSent) * 1000000 / deltaUs;
+
+                long realRecv = (currRecv - lastRecv) * 1_000_000 / deltaUs;
+                long realSent = (currSent - lastSent) * 1_000_000 / deltaUs;
                 double avgLat = (currRecv - lastRecv) > 0 ? (double)(currTotalLatency - lastTotalLatency) / (currRecv - lastRecv) / 1000.0 : 0.0;
+
                 lastRecv = currRecv; lastSent = currSent; lastTotalLatency = currTotalLatency; lastTime = currTime;
-                long next = engine.getCurrentTargetQps() + step;
-                if (totalTargetQps > 0 && next > totalTargetQps) next = totalTargetQps;
-                engine.setCurrentTargetQps(next);
-                String status = "✅ STABLE";
-                if (next > 0 && realSent < next * 0.85) status = "⚠️ CLIENT LAG";
-                if (realSent > 0 && realRecv < realSent * 0.90) status = "🔥 SERVER LAG";
-                if (totalTargetQps > 0 && next < totalTargetQps) status = "📈 CLIMBING";
-                System.out.printf("[MONITOR] Load: %-6d | Sent: %-7d | Recv: %-7d | Latency: %6.2f ms | %s\n", next, realSent, realRecv, avgLat, status);
+
+                // ==========================================
+                // 2. 引擎控制层 (Engine Control Layer)
+                // 核心逻辑：只管加压，不关心由于性能不足导致的 LAG
+                // ==========================================
+                long currentLoad = engine.getCurrentTargetQps();
+                long nextLoad = currentLoad + step;
+
+                // 停止增长的唯一条件：达到用户设定的总目标 (Total Target)
+                if (totalTargetQps > 0 && nextLoad > totalTargetQps) {
+                    nextLoad = totalTargetQps;
+                }
+
+                // 执行变轨
+                engine.setCurrentTargetQps(nextLoad);
+
+                // ==========================================
+                // 3. 视图显示层 (View/Display Layer)
+                // 核心逻辑：评估当前健康度，0.85 是健康容忍度，与是否加压无关
+                // ==========================================
+                String healthStatus;
+
+                // 这里的 0.85 是为了应对波动 (Jitter Tolerance)
+                // 只要实际发送量能跟上预设目标的 85%，我们就认为系统是"稳"的
+                if (nextLoad > 0 && realSent < nextLoad * 0.85) {
+                    healthStatus = "⚠️ CLIENT LAG";
+                } else if (realSent > 0 && realRecv < realSent * 0.85) {
+                    healthStatus = "🔥 SERVER LAG";
+                } else {
+                    healthStatus = "✅ STABLE";
+                }
+
+                // 辅助状态：显示当前是在 爬坡(Climbing) 还是 保持(Holding)
+                String phase = (totalTargetQps > 0 && nextLoad < totalTargetQps) ? "📈" : "🏁";
+
+                System.out.printf("[MONITOR] %s Load:%-9d | Sent:%-9d | Recv:%-9d | Latency:%-6.2fms | %s\n",
+                        phase, nextLoad, realSent, realRecv, avgLat, healthStatus);
             }
         }, "monitor-thread");
         monitor.setDaemon(true); monitor.start();

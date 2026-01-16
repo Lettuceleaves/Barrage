@@ -16,6 +16,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static java.lang.Thread.sleep;
+
 /**
  * ServerEngine (Fixed Resource Lifecycle)
  * 修复了 Already Closed 异常，调整了 try-with-resources 嵌套顺序。
@@ -64,7 +66,7 @@ public class ServerEngine {
 
         Thread monitor = new Thread(() -> {
             while (running) {
-                try { Thread.sleep(1000); } catch (InterruptedException e) { break; }
+                try { sleep(1000); } catch (InterruptedException e) { break; }
                 long count = REQ_IDENTIFIED.getAndSet(0);
                 if (count > 0 && running) {
                     System.out.println("[Server Internal] Processed reqs/sec: " + count);
