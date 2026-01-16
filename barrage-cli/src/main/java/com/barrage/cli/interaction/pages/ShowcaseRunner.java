@@ -41,7 +41,7 @@ public class ShowcaseRunner implements Ansi {
                 port,
                 DataSourceType.FILE,           // DataSourceType.FILE 对应模板加载逻辑
                 activeTemplate,                // 传递当前模板名称
-                2000000L
+                1000L
         );
     }
 }

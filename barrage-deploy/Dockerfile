@@ -1,46 +1,40 @@
-# 第一阶段：复用开发容器的 JDK 源 (确保版本对齐)
-FROM ghcr.io/graalvm/native-image-community:25 AS jdk-source
+# 第一阶段：提取 JRE (使用完整版镜像以获取 jmods)
+FROM ghcr.io/graalvm/native-image-community:25 AS jlink-builder
 
-# 第二阶段：生产运行环境
+# 执行 jlink 提取最小运行时
+# 删除了 --compress 参数以确保在所有 JDK 版本上都能通过
+RUN jlink \
+    --add-modules java.base,java.logging,java.desktop,java.management,jdk.unsupported,jdk.charsets,java.naming,java.sql \
+    --strip-debug \
+    --no-man-pages \
+    --no-header-files \
+    --output /opt/runtime-min
+
+# 第二阶段：生产镜像 (使用 Debian Slim 确保 glibc 兼容性)
 FROM debian:bookworm-slim
 
-# 1. 设置生产环境变量
-# 解决你之前遇到的 Banner 乱码 (UTF-8)
-ENV LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8 \
-    DEBIAN_FRONTEND=noninteractive
+ENV JAVA_HOME=/opt/java \
+    PATH="/opt/java/bin:${PATH}" \
+    LANG=C.UTF-8
 
-# 2. 仅安装运行必需的库
-# - liburing2: io_uring 运行时库 (解决 liburing.so.2 缺失问题)
-# - procps: 提供基本进程查看
+# 安装 liburing2 (io_uring) 和 CA 证书
 RUN apt-get update && apt-get install -y --no-install-recommends \
     liburing2 \
-    procps \
+    ca-certificates \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 3. 按照你开发容器的逻辑提取 JDK
-COPY --from=jdk-source /usr/lib64/graalvm /tmp/graalvm_temp
-RUN export REAL_PATH=$(find /tmp/graalvm_temp -name java | sed 's/\/bin\/java//' | head -n 1) && \
-    mkdir -p /opt/graalvm-25 && \
-    cp -r "$REAL_PATH"/* /opt/graalvm-25/ && \
-    rm -rf /tmp/graalvm_temp
+# 从第一阶段拷贝定制的运行时
+COPY --from=jlink-builder /opt/runtime-min /opt/java
 
-# 4. 配置环境变量
-ENV JAVA_HOME=/opt/graalvm-25
-ENV PATH="${JAVA_HOME}/bin:${PATH}"
-
-# 5. 应用部署
 WORKDIR /app
-# 这里的 app.jar 是由 run.sh 脚本从子模块 target 拷贝过来的
-COPY app.jar /app/app.jar
 
-COPY path.toml /app/path.toml
+# 拷贝应用文件
+COPY app.jar path.toml ./
+# 如果没有 config 文件夹，先创建它以防报错
+RUN mkdir -p config
+COPY config ./config
 
-COPY config /app/config
-
-# 声明端口
 EXPOSE 8080-8180
 
-# 6. 启动命令
-# --enable-native-access=ALL-UNNAMED: 必须开启以支持 JDK 25 的 FFM API
-ENTRYPOINT ["java", "--enable-native-access=ALL-UNNAMED", "-jar", "/app/app.jar"]
+# 启动
+ENTRYPOINT ["java", "--enable-native-access=ALL-UNNAMED", "-jar", "app.jar"]

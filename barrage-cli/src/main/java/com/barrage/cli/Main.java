@@ -10,24 +10,42 @@ import com.barrage.kernel.config.basic.BasicConfig;
 public class Main {
 
     public static void main(String[] args) {
-        // --- 0. 引导阶段 (Bootstrap) ---
-        // 必须在任何业务逻辑之前加载 TOML 配置
-        // 如果 path.toml 或 config.toml 不存在，内部会 System.exit(1)
-
-        // 使用 try-with-resources 确保控制台资源正确管理
         try (Terminal terminal = new Terminal()) {
-
             Banner.print(terminal);
             BasicConfig.load();
 
-            // 1. 进入交互式主页 (Home)
-            // 此时 BasicConfig 已被 TOML 填充，Home 可以安全地读取配置并展示给用户
-            LaunchContext ctx = Home.open(terminal);
+            while (true) {
+                try {
+                    // [核心修复]
+                    // 1. 确保在进入菜单前，之前的日志全部输出完毕
+                    System.out.flush();
 
-            EngineBootstrap.run(terminal, ctx);
+                    // 2. 清除线程中断标记，防止 Scanner 误判
+                    Thread.interrupted();
 
+                    // 3. 尝试消耗掉输入流中残留的回车符 (Non-blocking check)
+                    // 注意：这里只能做简单清理，不能调用阻塞的 read
+                    if (System.in.available() > 0) {
+                        System.in.read(new byte[System.in.available()]);
+                    }
+
+                    // 4. 进入主页
+                    LaunchContext ctx = Home.open(terminal);
+
+                    // 5. 执行任务
+                    EngineBootstrap.run(terminal, ctx);
+
+                    // 6. 任务结束，打印分隔符并立即进入下一次循环
+                    terminal.line();
+                    terminal.info(">>> Ready.");
+
+                } catch (Exception e) {
+                    terminal.error("\n[Error] " + e.getMessage());
+                    // 防止死循环刷屏，仅在出错时等待
+                    try { Thread.sleep(1000); } catch (Exception ignored) {}
+                }
+            }
         } catch (Exception e) {
-            System.err.println("\n[FATAL ERROR] Engine crashed: " + e.getMessage());
             e.printStackTrace();
             System.exit(1);
         }

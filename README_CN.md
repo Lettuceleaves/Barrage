@@ -37,7 +37,15 @@
 
 ## 快速开始
 
-### 1. 克隆仓库
+```
+# docker
+docker run -it --privileged -p 8088:8080 --name barrage lettuceleaves/barrage:v1.0.1
+docker run -it --privileged -p 8088:8080 -v /path/to/your/config:/app/config --name barrage lettuceleaves/barrage:v1.0.1
+```
+
+## 开发环境
+
+### 克隆仓库
 
  ```bash
  git clone https://github.com/Lettuceleaves/Barrage.git
