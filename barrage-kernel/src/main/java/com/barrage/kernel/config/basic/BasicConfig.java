@@ -10,7 +10,32 @@ import java.io.PrintWriter;
 import java.nio.file.Path;
 
 /**
- * Barrage Kernel 严格配置中心 (Unified)
+ * Barrage Kernel 的核心统一配置中心 (Unified Configuration Center)。
+ * <p>
+ * 该类作为全局单例（静态类），负责管理应用程序的所有运行时参数。
+ * 它实现了配置文件的双向同步：既负责在启动时从磁盘 ({@code config.toml}) 加载参数到内存，
+ * 也支持在运行时将内存中的修改回写持久化到磁盘。
+ *
+ * <h2>核心特性：</h2>
+ * <ul>
+ * <li><b>两级引导机制：</b> 首先读取 {@code path.toml} 定位配置目录，然后加载实际的 {@code config.toml}，
+ * 支持灵活的部署结构。</li>
+ * <li><b>严格初始化校验 (Strict Validation)：</b> 在 {@code finishInitialization} 中强制检查所有必填字段，
+ * 防止因配置缺项导致的运行时空指针异常 (NPE)。对于 {@code QUEUE_DEPTH} 等敏感参数，
+ * 还会校验其是否符合物理限制（如必须为 2 的幂）。</li>
+ * <li><b>内存屏障保护：</b> 所有 Getter 方法均受 {@code checkReady()} 保护，
+ * 确保在配置未完全加载就绪前，任何访问尝试都会抛出致命错误，防止脏读。</li>
+ * </ul>
+ *
+ * <h2>线程安全性：</h2>
+ * <b>部分线程安全。</b>
+ * 初始化过程 ({@code load}, {@code finishInitialization}) 是同步的。
+ * 运行时修改 (Setters) 和读取 (Getters) 操作直接读写静态字段。
+ * 在 CLI 的单线程交互模型下是安全的，但在多线程并发修改配置的极端场景下可能存在可见性问题（尽管实际业务中极少发生）。
+ *
+ * @author LettuceLeaves
+ * @version 1.0
+ * @since 2026/1/6
  */
 @SuppressFBWarnings(value = "MS_SHOULD_BE_FINAL", justification = "Configuration must be injected at runtime")
 public class BasicConfig {
@@ -37,6 +62,18 @@ public class BasicConfig {
     // Part 1: 加载与持久化逻辑
     // =================================================================================
 
+    /**
+     * 从磁盘加载并初始化内核配置。
+     * <p>
+     * 执行流程：
+     * <ol>
+     * <li>读取根目录下的 {@code path.toml}，解析 {@code config_dir} 路径。</li>
+     * <li>在指定目录下寻找 {@code config.toml}。</li>
+     * <li>使用 Jackson TOML Mapper 解析配置文件，并将值注入到静态字段中。</li>
+     * <li>执行 {@code finishInitialization} 进行完整性校验。</li>
+     * </ol>
+     * 如果任一步骤失败（如文件缺失、格式错误、字段遗漏），程序将打印错误日志并直接退出 (System.exit)。
+     */
     public static void load() {
         try {
             File bootstrap = new File("path.toml");
@@ -88,6 +125,14 @@ public class BasicConfig {
         }
     }
 
+    /**
+     * 将当前内存中的配置状态持久化到磁盘。
+     * <p>
+     * 该方法会重写 {@code config.toml} 文件，格式化输出当前的参数值。
+     * 用于保存用户在 CLI 界面中所做的修改（如更换模板、调整线程数等）。
+     *
+     * @throws RuntimeException 如果写入文件失败
+     */
     public static void save() {
         checkReady();
         try {
@@ -133,6 +178,12 @@ public class BasicConfig {
     // Part 2: 状态管理与 Setter/Getter
     // =================================================================================
 
+    /**
+     * 完成初始化并执行完整性校验。
+     * <p>
+     * 检查所有必须的配置字段是否已赋值。如果发现任何 {@code null} 值，抛出异常。
+     * 此方法是 {@link #initialized} 标志位置位的唯一入口。
+     */
     private static synchronized void finishInitialization() {
         if (ip == null || port == null || serverThreads == null || clientThreads == null ||
                 connsPerClient == null || step == null || inFlight == null || queueDepth == null ||
@@ -142,6 +193,11 @@ public class BasicConfig {
         initialized = true;
     }
 
+    /**
+     * 状态屏障。
+     * <p>
+     * 确保配置已加载。如果未初始化即访问 Getter，抛出致命错误。
+     */
     private static void checkReady() {
         if (!initialized) throw new IllegalStateException("[FATAL] BasicConfig accessed before initialized!");
     }
@@ -153,9 +209,16 @@ public class BasicConfig {
     public static void setSERVER_THREADS(int val) { serverThreads = val; }
     public static void setCLIENT_THREADS(int val) { clientThreads = val; }
     public static void setCONNS_PER_CLIENT(int val) { connsPerClient = val; }
-    public static void setSTEP(int val) { step = val; } // 补充 Setter
+
+    /** 设置 QPS 递增步长 (Step)。 */
+    public static void setSTEP(int val) { step = val; }
     public static void setIN_FLIGHT(int val) { inFlight = val; }
 
+    /**
+     * 设置 io_uring 提交/完成队列深度。
+     * @param val 深度值，必须为 > 0 的 2 的幂 (如 4096, 8192)。
+     * @throws IllegalArgumentException 如果参数校验失败
+     */
     public static void setQUEUE_DEPTH(int val) {
         if (val <= 0 || (val & (val - 1)) != 0) {
             throw new IllegalArgumentException("QUEUE_DEPTH must be a power of 2 and > 0");
@@ -174,7 +237,9 @@ public class BasicConfig {
     public static int getSERVER_THREADS() { checkReady(); return serverThreads; }
     public static int getCLIENT_THREADS() { checkReady(); return clientThreads; }
     public static int getCONNS_PER_CLIENT() { checkReady(); return connsPerClient; }
-    public static int getSTEP() { checkReady(); return step; } // 补充 Getter
+
+    /** 获取 QPS 递增步长 (用于 Ramping 策略)。 */
+    public static int getSTEP() { checkReady(); return step; }
     public static int getIN_FLIGHT() { checkReady(); return inFlight; }
     public static int getQUEUE_DEPTH() { checkReady(); return queueDepth; }
     public static int getBATCH_SIZE() { checkReady(); return batchSize; }
@@ -183,6 +248,11 @@ public class BasicConfig {
 
     public static String getConfigDir() { checkReady(); return configDir; }
 
+    /**
+     * 便捷方法：同时更新 IP 和端口。
+     * @param newIp   新目标 IP
+     * @param newPort 新目标端口
+     */
     public static synchronized void updateEndpoint(String newIp, int newPort) {
         setIP(newIp);
         setPORT(newPort);

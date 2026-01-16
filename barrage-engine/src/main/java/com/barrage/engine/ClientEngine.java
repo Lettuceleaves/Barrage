@@ -15,8 +15,37 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.concurrent.locks.LockSupport;
 
+/**
+ * 基于 {@code io_uring} 的高性能 HTTP 流量生成引擎 (Client Engine)。
+ * <p>
+ * 该类是 Barrage 压测端的核心驱动器，负责管理一组独立的工作线程 ({@link ClientWorker})，
+ * 通过异步非阻塞 I/O 向目标服务器发起高频攻击。每个工作线程都维护独立的 {@code io_uring} 实例
+ * 和连接池，实现了完全无锁的 Thread-Per-Core 架构。
+ *
+ * <h2>核心架构与特性：</h2>
+ * <ul>
+ * <li><b>请求批处理 (Request Batching)：</b> 预先在堆外内存中构建包含 N 个 HTTP 请求的连续内存段。
+ * 发送时只需一次系统调用 ({@code io_uring_prep_send}) 即可发送批量数据，极大降低了 System Call 开销。</li>
+ * <li><b>令牌桶限流 (Token Bucket Limiter)：</b> 内置微秒级精度的软限流算法。
+ * 通过 {@code currentTargetQps} 动态控制令牌生成速率，支持在运行时平滑调整负载 (Ramping)。</li>
+ * <li><b>响应累加器 (Response Accumulator)：</b> 解决了 TCP 拆包/粘包导致的逻辑死锁问题。
+ * 即使一次 {@code read} 调用只返回了部分 HTTP 响应头，累加器也能正确追踪进度，
+ * 直到凑齐一个完整的 Batch 周期才推进滑动窗口。</li>
+ * <li><b>采样延迟统计：</b> 为了避免高频调用 {@code System.nanoTime()} 带来的性能损耗，
+ * 采用稀疏采样策略 (Sparse Sampling)，每 {@code SAMPLE_STEP} 个 Batch 仅统计一次延迟。</li>
+ * </ul>
+ *
+ * <h2>线程安全性：</h2>
+ * <b>线程安全 (Thread-Safe)。</b>
+ * 外部控制方法（{@code start}, {@code shutdown}, {@code setCurrentTargetQps}）均经过同步处理或使用
+ * volatile/原子变量，支持在 UI 线程动态调整参数。内部 Worker 线程之间完全隔离，无共享状态竞争。
+ *
+ * @author LettuceLeaves
+ * @version 1.0
+ * @since 2026/1/6
+ * @see IoUring
+ */
 public class ClientEngine {
     private final String targetIp;
     private final int targetPort;
@@ -36,6 +65,18 @@ public class ClientEngine {
     private volatile boolean running = false;
     private final List<Thread> workers = new ArrayList<>();
 
+    /**
+     * 构造一个新的客户端引擎实例。
+     *
+     * @param targetHost      目标主机名或 IP 地址
+     * @param targetPort      目标端口
+     * @param threads         并发 Worker 线程数
+     * @param targetQps       初始目标总 QPS (上限)
+     * @param respCounter     全局响应计数器 (用于监控)
+     * @param sentCounter     全局发送计数器 (用于监控)
+     * @param requestTemplate HTTP 请求模板，将用于生成批量请求数据
+     * @throws RuntimeException 如果目标主机名无法解析
+     */
     public ClientEngine(String targetHost, int targetPort, int threads,
                         long targetQps,
                         LongAdder respCounter, LongAdder sentCounter,
@@ -57,10 +98,32 @@ public class ClientEngine {
         prepareBatchedRequest();
     }
 
+    /**
+     * 动态调整当前的目标 QPS。
+     * <p>
+     * 该操作是轻量级的，修改后的值会被所有 Worker 线程在下一轮循环中感知，
+     * 从而改变令牌桶的填充速率。用于实现压力测试中的“爬坡”或“变轨”。
+     *
+     * @param qps 新的目标 QPS 值
+     */
     public void setCurrentTargetQps(long qps) { this.currentTargetQps = qps; }
+
     public long getCurrentTargetQps() { return currentTargetQps; }
+
+    /**
+     * 获取累积的总延迟 (微秒)。
+     * <p>
+     * 注意：这不是平均延迟，而是所有采样点的延迟总和。
+     * 平均延迟计算公式：{@code totalLatency / (recvCount * batchSize / sampleStep)}。
+     */
     public long getTotalLatencyMicros() { return totalLatencyMicros.sum(); }
 
+    /**
+     * 预生成批量请求数据。
+     * <p>
+     * 将单个 HTTP 请求模板复制 {@code batchSize} 次，拼接成一个连续的堆外内存段 (Off-heap MemorySegment)。
+     * 这允许我们在一次 {@code send} 系统调用中发送多个逻辑请求，显著提升吞吐量。
+     */
     private void prepareBatchedRequest() {
         byte[] srcBytes = requestTemplate.toBytes();
         long totalLen = (long) srcBytes.length * batchSize;
@@ -71,6 +134,12 @@ public class ClientEngine {
         }
     }
 
+    /**
+     * 启动引擎。
+     * <p>
+     * 创建并启动指定数量的 {@link ClientWorker} 线程。每个线程被绑定为系统线程，
+     * 并被赋予初始的 QPS 配额。
+     */
     public void start() {
         this.running = true;
         // 这里的 qpsPerThread 只是个初始参考值，实际运行中会动态计算
@@ -82,6 +151,12 @@ public class ClientEngine {
         }
     }
 
+    /**
+     * 优雅关闭引擎。
+     * <p>
+     * 发送中断信号通知所有 Worker 停止运行，并等待其退出（超时 2 秒）。
+     * 最后释放全局共享内存 Arena。
+     */
     public void shutdown() {
         if (!running) return;
         running = false;
@@ -99,6 +174,12 @@ public class ClientEngine {
         }
     }
 
+    /**
+     * 客户端工作线程 (Inner Worker)。
+     * <p>
+     * 每个 Worker 独占一个 {@code io_uring} 实例，维护固定数量的长连接。
+     * 核心逻辑是一个基于令牌桶的 Event Loop。
+     */
     private class ClientWorker implements Runnable {
         private final long initialTargetQps;
         private final boolean[] isWritePending;
@@ -117,6 +198,7 @@ public class ClientEngine {
         private long lastTime = System.nanoTime();
         private static final int EVENT_READ = 1;
         private static final int EVENT_WRITE = 2;
+        // "HTTP" (ASCII) in Little Endian integer
         private static final int HTTP_HEADER_INT = 0x50545448;
 
         ClientWorker(long targetQps) {
@@ -130,6 +212,18 @@ public class ClientEngine {
             this.responseAccumulator = new int[capacity];
         }
 
+        /**
+         * Worker 主循环。
+         * <p>
+         * 执行流程：
+         * <ol>
+         * <li><b>连接建立：</b> 初始化所有 Native Socket 连接并注册到 io_uring。</li>
+         * <li><b>循环阶段 A - 令牌桶计算：</b> 根据时间差计算应发放的发送令牌。</li>
+         * <li><b>循环阶段 B - 发送请求：</b> 消耗令牌，向各连接的发送队列填充 SQE。如果触发背压 (Backpressure)，则跳过发送。</li>
+         * <li><b>循环阶段 C - 处理响应：</b> 轮询 CQE，处理完成的读/写事件，更新计数器和延迟统计。</li>
+         * <li><b>循环阶段 D - 等待策略：</b> 若无事可做，使用 {@code Thread.onSpinWait()} 自旋等待，避免上下文切换。</li>
+         * </ol>
+         */
         @Override
         public void run() {
             try (Arena arena = Arena.ofConfined();
@@ -227,6 +321,16 @@ public class ClientEngine {
             }
         }
 
+        /**
+         * 快速处理完成队列事件 (Fast Path)。
+         * <p>
+         * 处理读完成 (Response Received) 和写完成 (Request Sent) 事件。
+         * 核心逻辑包括：响应计数、滑动窗口推进、以及延迟采样结算。
+         *
+         * @param cqe         从 Ring 中取出的完成队列条目
+         * @param ring        Ring 实例
+         * @param memoryArena 内存管理器
+         */
         private void handleCqeFast(IoUring.Cqe cqe, IoUring ring, MemoryArena memoryArena) throws IOException {
             long userData = cqe.userData;
             int idx = (int) userData;
@@ -273,6 +377,16 @@ public class ClientEngine {
             }
         }
 
+        /**
+         * 扫描接收缓冲区，计算 HTTP 响应数量。
+         * <p>
+         * 使用跳跃扫描算法 (Skip-Scan)，查找 HTTP 协议魔数 (HTTP/1.1 -> 0x50545448)。
+         * 一旦找到，直接跳过最小响应长度 (40 bytes)，大幅提升解析速度。
+         *
+         * @param buffer 包含接收数据的内存段
+         * @param length 数据有效长度
+         * @return 识别到的响应个数
+         */
         private int countResponsesInBuffer(MemorySegment buffer, int length) {
             if (length < 12) return 0;
             int count = 0;
@@ -288,7 +402,7 @@ public class ClientEngine {
             return count;
         }
 
-        private boolean tryAddWrite(IoUring r, int fd, int idx) throws IOException {
+        private boolean tryAddWrite(IoUring r, int fd, int idx) {
             MemorySegment sqe = r.nextSqe();
             if (sqe == null) return false;
             r.prepSend(sqe, fd, batchedRequest, (int) batchedRequest.byteSize(), 0);
@@ -317,7 +431,7 @@ public class ClientEngine {
                     arena.setFd(idx, -1);
                 }
             } catch (IOException e) {
-                if (s != null) try { s.close(); } catch (Exception ex) {}
+                if (s != null) try { s.close(); } catch (Exception _) {}
                 arena.setFd(idx, -1);
             }
         }

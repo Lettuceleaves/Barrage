@@ -4,8 +4,49 @@ import com.barrage.cli.interaction.Ansi;
 import com.barrage.cli.interaction.Terminal;
 import com.barrage.kernel.config.basic.BasicConfig;
 
+/**
+ * Barrage 内核全局参数配置管理器。
+ * <p>
+ * 该类提供了一个可视化的交互式仪表盘，允许用户在运行时查看和修改 {@link BasicConfig} 中的核心参数。
+ * 它涵盖了从基础的网络设置（目标 IP/Port）到深度的 {@code io_uring} 性能调优选项。
+ *
+ * <h2>核心特性：</h2>
+ * <ul>
+ * <li><b>实时回显 (Live Reflection)：</b> 每次刷新界面都会直接从内存中读取 {@code BasicConfig} 的最新静态字段值，
+ * 确保显示的状态与内核实际使用的配置完全一致。</li>
+ * <li><b>深度调优能力：</b> 暴露了底层环形缓冲区 (Ring Buffer) 的关键参数（如 {@code Queue Depth}, {@code Batch Size}），
+ * 允许高级用户针对特定硬件环境进行微调。</li>
+ * <li><b>配置持久化：</b> 支持将当前内存中的修改保存到磁盘并在下次启动时自动加载，
+ * 同时提供“保存并重载”功能以立即验证配置文件的合法性。</li>
+ * </ul>
+ *
+ * <h2>线程安全性：</h2>
+ * <b>非线程安全 (Not Thread-Safe)。</b>
+ * 该类直接修改全局静态变量。虽然在单线程 CLI 交互流程中是安全的，
+ * 但如果在压测引擎运行期间并发调用此界面修改参数，可能会导致未定义的行为或数据竞争。
+ * 建议仅在压测任务开始前使用。
+ *
+ * @author LettuceLeaves
+ * @version 1.0
+ * @since 2026/1/6
+ */
 public class SettingsManager implements Ansi {
 
+    /**
+     * 打开配置管理仪表盘。
+     * <p>
+     * 进入一个阻塞式的读写循环，展示当前的配置列表。用户可以通过输入对应的数字序号修改特定参数，
+     * 或选择保存/退出。
+     * <p>
+     * <b>配置项分类：</b>
+     * <ul>
+     * <li><b>Network:</b> 目标地址与端口。</li>
+     * <li><b>Engine Threads & Stress:</b> 线程模型参数（Reactor 数量、连接池大小）及加压步长 (QPS Step)。</li>
+     * <li><b>io_uring Performance:</b> 提交队列深度、批量提交大小 (Batch Size) 及读缓冲区大小。</li>
+     * </ul>
+     *
+     * @param t 终端交互接口，用于渲染菜单和读取用户指令
+     */
     public static void open(Terminal t) {
         while (true) {
             t.clear();

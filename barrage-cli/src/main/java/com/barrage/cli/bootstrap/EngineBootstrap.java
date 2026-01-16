@@ -21,14 +21,69 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 
+/**
+ * Barrage 压测引擎的启动引导与运行时协调器。
+ * <p>
+ * 该类负责桥接 CLI 交互层与核心测试引擎，管理测试任务的全生命周期。
+ * 它不仅处理引擎的初始化、启动和优雅停机，还内置了一个独立的诊断监控线程，
+ * 负责实时调整负载（Ramping）并评估系统健康状态。
+ *
+ * <h2>核心特性：</h2>
+ * <ul>
+ * <li><b>双层监控逻辑：</b> 将“负载控制（Control Layer）”与“视图展示（View Layer）”解耦。
+ * 负载增长仅受限于目标 QPS，而系统健康状态（LAG/STABLE）则基于 0.85 的抖动容忍阈值判定。</li>
+ * <li><b>优雅停机 (Graceful Shutdown)：</b> 集成 {@link SignalGuard} 处理 SIGINT (Ctrl+C)，
+ * 确保在用户强制中断或任务结束时，所有 {@code io_uring} 资源和线程都能安全释放。</li>
+ * <li><b>GC 探测探针：</b> 利用 {@link WeakReference} 机制检测 JVM 的 Full GC 事件，
+ * 在控制台实时告警，辅助排查由此导致的延迟抖动。</li>
+ * </ul>
+ *
+ * <h2>线程安全性：</h2>
+ * <b>线程兼容 (Thread-Compatible)。</b>
+ * 该类通过 {@link AtomicBoolean} 和 {@link LongAdder} 保证内部状态在 UI 线程、
+ * 监控线程和 Shutdown Hook 之间的可见性。设计为单次执行流程，不应并发调用 {@code run} 方法。
+ *
+ * @author LettuceLeaves
+ * @version 1.0
+ * @since 2026/1/6
+ */
 public class EngineBootstrap implements Ansi {
 
+    /**
+     * 实时接收 QPS 计数器 (全局累加)。
+     */
     private static final LongAdder RECV_QPS = new LongAdder();
+
+    /**
+     * 实时发送 QPS 计数器 (全局累加)。
+     */
     private static final LongAdder SENT_QPS = new LongAdder();
+
+    /**
+     * GC 探测探针，若该弱引用对象被回收，说明发生了 GC。
+     */
     private static volatile WeakReference<byte[]> GC_PROBE;
+
+    /**
+     * 引擎运行状态标志位，控制所有后台线程的生命周期。
+     */
     private static final AtomicBoolean IS_RUNNING = new AtomicBoolean(false);
+
+    /**
+     * 停机任务的 Future，用于确保 shutdown 逻辑只执行一次且主线程能等待其完成。
+     */
     private static final AtomicReference<CompletableFuture<Void>> SHUTDOWN_FUTURE = new AtomicReference<>();
 
+    /**
+     * 启动压测任务的主流程。
+     * <p>
+     * 该方法会阻塞当前线程，直到用户按回车停止、达到预设时间或收到系统中断信号。
+     * 流程包括：资源初始化 -> 启动自测服务端(可选) -> 启动客户端引擎 -> 启动监控 -> 等待结束 -> 资源释放。
+     *
+     * @param t   终端交互接口，用于输出格式化日志
+     * @param ctx 启动上下文，包含 IP、端口、QPS 目标等参数
+     * @throws Exception 如果初始化失败或执行过程中发生未捕获异常
+     */
     public static void run(Terminal t, LaunchContext ctx) throws Exception {
         RECV_QPS.reset(); SENT_QPS.reset(); IS_RUNNING.set(true);
         SHUTDOWN_FUTURE.set(new CompletableFuture<>());
@@ -101,14 +156,23 @@ public class EngineBootstrap implements Ansi {
             try {
                 // 等待后台关闭彻底完成
                 SHUTDOWN_FUTURE.get().join();
-            } catch (Exception e) {}
+            } catch (Exception _) {}
 
             // 确保没有残留的中断状态干扰回到主菜单
             Thread.interrupted();
         }
     }
 
-    // ... prepareTemplate, startDiagnosticMonitor, setupGcDetector 保持不变 ...
+    /**
+     * 准备 HTTP 请求模板。
+     * <p>
+     * 根据上下文配置，从控制台交互输入或从预设的模板文件中加载请求详情（Method, Headers, Body）。
+     *
+     * @param t   终端接口
+     * @param ctx 启动上下文
+     * @return 构造好的 HTTP 模板对象
+     * @throws RuntimeException 如果指定的模板名称不存在
+     */
     private static HttpTemplate prepareTemplate(Terminal t, LaunchContext ctx) {
         if (ctx.getSourceType() == DataSourceType.CONSOLE) return new ConsoleDataSource().load(null);
         else {
@@ -121,6 +185,23 @@ public class EngineBootstrap implements Ansi {
             return template;
         }
     }
+
+    /**
+     * 启动诊断监控线程 (Diagnostic Monitor)。
+     * <p>
+     * 该线程作为守护线程运行，执行周期为 1 秒，承担三项关键职责：
+     * <ol>
+     * <li><b>数据采集：</b> 计算瞬时 QPS、延迟等核心指标。</li>
+     * <li><b>引擎控制 (Control Layer)：</b> 执行线性加压 (Ramping)，每秒增加 {@code step} 负载，
+     * 直到达到 {@code totalTargetQps}。此逻辑不依赖当前系统健康度，强制推高负载以测试极限。</li>
+     * <li><b>视图展示 (View Layer)：</b> 根据实际发送/接收量与目标负载的比率，
+     * 评估系统是否处于 LAG 状态 (阈值为 0.85)，并输出 ANSI 格式的监控日志。</li>
+     * </ol>
+     *
+     * @param t              终端接口
+     * @param engine         客户端引擎实例
+     * @param totalTargetQps 用户设定的最大目标 QPS
+     */
     private static void startDiagnosticMonitor(Terminal t, ClientEngine engine, long totalTargetQps) {
         Thread monitor = new Thread(() -> {
             long lastRecv = 0, lastSent = 0, lastTotalLatency = 0, lastTime = System.nanoTime();
@@ -186,6 +267,14 @@ public class EngineBootstrap implements Ansi {
         }, "monitor-thread");
         monitor.setDaemon(true); monitor.start();
     }
+
+    /**
+     * 启动 JVM GC 探测器。
+     * <p>
+     * 创建一个守护线程，通过轮询检查 {@link WeakReference} 是否为空来判断是否发生了
+     * Full GC 或 Major GC。一旦检测到，将在控制台输出警告。
+     * 这对于排查高压测试下的“Stop-The-World”卡顿非常有效。
+     */
     private static void setupGcDetector() {
         GC_PROBE = new WeakReference<>(new byte[1024]);
         Thread detector = new Thread(() -> {
