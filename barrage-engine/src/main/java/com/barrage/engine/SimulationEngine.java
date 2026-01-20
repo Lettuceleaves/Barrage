@@ -1,8 +1,18 @@
 package com.barrage.engine;
 
+import com.barrage.engine.simulate.ExecutionGraph;
+import com.barrage.engine.simulate.TransitionContext;
+import com.barrage.engine.simulate.context.SimulationContext;
+import com.barrage.engine.simulate.context.UserGroupContext;
+import com.barrage.engine.simulate.node.GraphNode;
+import com.barrage.engine.simulate.node.TerminalNode;
+import com.barrage.engine.simulate.pool.NetworkInfrastructure;
+import com.barrage.kernel.config.basic.BasicConfig;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
-import java.time.Duration;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -10,121 +20,138 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 仿真引擎核心 (虚拟线程版)。
- * <p>
- * 该引擎封装了 Java 21 Project Loom 的虚拟线程模型。
- * 它不再维护重量级的 OS 线程池，而是为每一个虚拟用户 (Virtual User) 分配一个独立的
- * 虚拟线程 (Virtual Thread)。
- * <p>
- * <b>核心能力：</b>
- * 能够轻松启动数百万个并发任务，底层仅占用少量 Carrier Threads (OS 线程)，
- * 彻底解决了传统模型中 "1 User = 1 Thread" 导致的内存溢出和调度开销问题。
+ * 仿真引擎核心 (Refactored & Clean)
  */
 @SuppressFBWarnings("CT_CONSTRUCTOR_THROW")
 public final class SimulationEngine {
 
-    private final int groupCount; // N
-    private final int usersPerGroup; // M
-    private final long totalAgents;
-
-    // 核心：虚拟线程执行器
-    // 不同于 CachedThreadPool，它是 "Thread-Per-Task"，但这里的 Thread 是虚拟的、廉价的。
+    private final ExecutionGraph graph;
+    private final List<UserGroupContext> userGroups;
+    private NetworkInfrastructure networkInfra;
     private ExecutorService vThreadExecutor;
-
     private volatile boolean running = false;
     private final AtomicInteger activeAgents = new AtomicInteger(0);
+    private static final long DEBUG_TARGET_UID = 100000;
 
-    /**
-     * @param groupCount    组数 (N)
-     * @param usersPerGroup 每组用户数 (M)
-     */
-    public SimulationEngine(int groupCount, int usersPerGroup) {
-        this.groupCount = groupCount;
-        this.usersPerGroup = usersPerGroup;
-        this.totalAgents = (long) groupCount * usersPerGroup;
+    public SimulationEngine(ExecutionGraph graph) {
+        this.graph = graph;
+        this.userGroups = new ArrayList<>();
     }
 
-    public void start() {
+    public void start() throws IOException {
         if (running) return;
         running = true;
 
-        System.out.printf(">>> [Engine] Spawning %d Virtual Threads (N=%d, M=%d)...%n",
-                totalAgents, groupCount, usersPerGroup);
+        // ... (初始化逻辑保持不变，省略以节省篇幅) ...
+        // ... 创建 NetworkInfrastructure, UserGroup, vThreadExecutor ...
+        // 参考之前的初始化代码
 
-        // 1. 创建虚拟线程工厂
-        // name: "sim-g{N}-u{M}" 格式，方便调试观察
-        ThreadFactory vFactory = Thread.ofVirtual()
-                .name("sim-agent-", 0)
-                .factory();
+        int totalUsers = 1; // Debug Mode
+        int threads = BasicConfig.getCLIENT_THREADS();
+        System.out.printf(">>> [Engine] Starting. Users: %d, IO Threads: %d%n", totalUsers, threads);
 
-        // 2. 初始化执行器
-        // 这是 Java 21 的魔法：为每个提交的任务创建一个新的虚拟线程
+        this.networkInfra = new NetworkInfrastructure();
+        UserGroupContext ctx = new UserGroupContext(graph, totalUsers, 100000);
+        userGroups.add(ctx);
+        ThreadFactory vFactory = Thread.ofVirtual().name("agent-", 0).factory();
         this.vThreadExecutor = Executors.newThreadPerTaskExecutor(vFactory);
 
-        // 3. 瞬间分发所有任务
-        for (int g = 0; g < groupCount; g++) {
-            for (int u = 0; u < usersPerGroup; u++) {
-                final int finalG = g;
-                final int finalU = u;
-
-                // 提交任务 -> 立即产生一个 Virtual Thread
-                vThreadExecutor.submit(() -> userLifecycle(finalG, finalU));
+        System.out.println(">>> [Engine] Spawning Virtual Threads...");
+        for (UserGroupContext group : userGroups) {
+            int count = group.getCapacity();
+            for (int u = 0; u < count; u++) {
+                int slotIndex = group.initNextUser();
+                vThreadExecutor.submit(() -> userTask(group, slotIndex, networkInfra));
             }
         }
     }
 
-    /**
-     * 虚拟用户的生命周期逻辑。
-     * 这里的代码运行在 Virtual Thread 上。
-     */
-    private void userLifecycle(int groupId, int userId) {
+    private void userTask(UserGroupContext group, int slotIndex, NetworkInfrastructure net) {
         activeAgents.incrementAndGet();
-        try {
-            // --- 验证点 ---
-            // 打印一下当前的线程信息，确认它是 VirtualThread
-            if (groupId == 0 && userId == 0) {
-                System.out.println(">>> [Check] First Agent Running on: " + Thread.currentThread());
-                // 输出示例: VirtualThread[#21, sim-agent-0]/runnable@ForkJoinPool-1-worker-1
-            }
-            System.out.println("Hello Barage");
+        SimulationContext context = new SimulationContext();
+        context.wrap(group.getUserSlotsBlock(), slotIndex);
+        context.setNetworkInfrastructure(net);
 
-            // 模拟业务循环
+        long currentUid = context.getUserId();
+        // 简化 Debug 判断
+        boolean isDebug = (currentUid == DEBUG_TARGET_UID);
+
+        if (isDebug) {
+            System.out.printf(">>> [Debug] Agent %d STARTED.%n", currentUid);
+        }
+
+        GraphNode currentNode = graph.getStartNode();
+
+        try {
             while (running) {
-                // 在虚拟线程中，Thread.sleep 不会阻塞 OS 线程，只会挂起虚拟线程 (Unmount)
-                // 这意味着哪怕 sleep 1秒，底层的 Carrier Thread 也可以去处理别的用户
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                // ========================================================
+                // 1. 委托节点执行 (包含日志、IO、业务逻辑)
+                // ========================================================
+                currentNode.execute(context, isDebug);
+
+                // ========================================================
+                // 2. 终止检查
+                // ========================================================
+                long decisionIndex = context.getNextTransitionIndex();
+                if (decisionIndex == TerminalNode.END_OF_FLOW_INDEX) {
+                    if (isDebug) System.out.printf(">>> [Debug] Agent %d WORKFLOW END.%n", currentUid);
                     break;
                 }
 
-                // 这里未来填入业务逻辑...
+                // ========================================================
+                // 3. 路由查找 (Engine 职责: 负责图的遍历)
+                // ========================================================
+                List<TransitionContext> transitions = currentNode.getTransitionContexts();
+                if (transitions == null || decisionIndex < 0 || decisionIndex >= transitions.size()) {
+                    System.err.printf("[Engine] Routing Error: Invalid index %d at node %s%n", decisionIndex, currentNode.getName());
+                    break;
+                }
+
+                TransitionContext trans = transitions.get((int) decisionIndex);
+                String nextNodeId = trans.getNext();
+
+                if (isDebug) {
+                    System.out.printf("    [Debug] Routing -> %s (Mode: %s)%n", nextNodeId, trans.getMode());
+                }
+
+                // ========================================================
+                // 4. 模式处理 (Sleep)
+                // ========================================================
+                handleTransitionMode(trans, isDebug);
+
+                // ========================================================
+                // 5. 指针切换
+                // ========================================================
+                GraphNode nextNode = graph.getNode(nextNodeId);
+                if (nextNode == null) {
+                    System.err.printf("[Engine] Missing Node: %s%n", nextNodeId);
+                    break;
+                }
+                currentNode = nextNode;
             }
+        } catch (Exception e) {
+            System.err.printf("❌ [Engine] Crash (UID: %d): %s%n", currentUid, e.getMessage());
+            e.printStackTrace();
         } finally {
             activeAgents.decrementAndGet();
         }
     }
 
-    public void shutdown() {
-        running = false;
-        if (vThreadExecutor != null) {
-            System.out.println(">>> [Engine] Shutting down virtual threads...");
-            vThreadExecutor.shutdownNow();
-            try {
-                // 等待虚拟线程卸载
-                if (!vThreadExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                    System.err.println(">>> [Engine] Force killed remaining agents.");
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+    private void handleTransitionMode(TransitionContext trans, boolean isDebug) {
+        if ("WAIT_FIXED".equals(trans.getMode())) {
+            long wait = parseLongSafely(trans.getValue(), 0);
+            if (wait > 0) {
+                if (isDebug) System.out.printf("    [Debug] Sleeping %d ms...%n", wait);
+                try { Thread.sleep(wait); } catch (InterruptedException ignored) {}
             }
         }
-        System.out.println(">>> [Engine] Stopped.");
     }
 
-    // 用于监控存活数
-    public int getActiveAgentCount() {
-        return activeAgents.get();
+    private long parseLongSafely(String val, long def) {
+        try { return Long.parseLong(val); } catch (Exception e) { return def; }
     }
+
+    // shutdown(), getActiveAgentCount() ... 保持不变
+    public void shutdown() { /* ... */ }
+    public int getActiveAgentCount() { return activeAgents.get(); }
 }

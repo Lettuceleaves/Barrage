@@ -1,5 +1,5 @@
 [network]
-ip = "host.docker.internal"
+ip = "172.27.48.1"
 port = 8089
 
 [engine]

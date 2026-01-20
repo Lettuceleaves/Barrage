@@ -3,6 +3,7 @@ package com.barrage.cli.interaction.pages;
 import com.barrage.cli.interaction.Ansi;
 import com.barrage.cli.interaction.Terminal;
 import com.barrage.engine.StandardEngine;
+import com.barrage.kernel.config.basic.BasicConfig;
 import com.barrage.protocol.HTTP.HttpTemplate;
 import com.barrage.protocol.datasource.ConsoleDataSource;
 
@@ -35,8 +36,8 @@ public class SingleRequestPage implements Ansi {
             // 3. 执行请求 (捕获所有耗时和异常)
             long start = System.currentTimeMillis();
             String response = StandardEngine.execute(
-                    com.barrage.kernel.config.basic.BasicConfig.getIP(),
-                    com.barrage.kernel.config.basic.BasicConfig.getPORT(),
+                    BasicConfig.getIP(),
+                    BasicConfig.getPORT(),
                     template,
                     timeout
             );

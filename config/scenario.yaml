@@ -1,0 +1,73 @@
+graphName: "SmokeTestFlow"
+startNodeId: "node_start"
+
+nodes:
+  # 1. 起始节点
+  - id: "node_start"
+    type: "START"
+    name: "User Init"
+    transition:
+      mode: "NO_DELAY"
+      next: "node_login"
+
+  # 2. HTTP 节点 (模拟登录)
+  - id: "node_login"
+    type: "HTTP"
+    name: "Login Request"
+    templateRef: "tpl_login_001"
+    transition:
+      mode: "WAIT_FIXED" # 模拟网络延迟
+      next: "node_check_response"
+
+  # 3. 条件节点 (检查登录是否成功)
+  # 逻辑：检查变量 "last_code" 是否等于 "200"
+  - id: "node_check_response"
+    type: "CONDITION"
+    name: "Check 200 OK"
+    targetVarName: "last_code"
+    expectedValue: "200" # Loader 会自动转为 byte[]
+    # 匹配成功的路径
+    matchTransition:
+      mode: "NO_DELAY"
+      next: "node_random_behavior"
+    # 匹配失败的路径 (去失败终点)
+    mismatchTransition:
+      mode: "NO_DELAY"
+      next: "node_term_fail"
+
+  # 4. 概率分支节点 (流量分流)
+  - id: "node_random_behavior"
+    type: "CHANCE"
+    name: "Split Traffic"
+    branches:
+      - weight: 0
+        transition:
+          mode: "NO_DELAY"
+          next: "node_browsing" # 30% 去浏览
+      - weight: 100
+        transition:
+          mode: "NO_DELAY"
+          next: "node_term_success" # 70% 直接下线
+
+  # 5. HTTP 节点 (浏览)
+  - id: "node_browsing"
+    type: "HTTP"
+    name: "Browse Items"
+    templateRef: "tpl_browse_list"
+    transition:
+      mode: "WAIT_FIXED"
+      next: "node_term_success"
+
+  # 6. 终止节点 (成功)
+  - id: "node_term_success"
+    type: "TERMINAL"
+    name: "Finished OK"
+    resultTag: "SUCCESS"
+    saveContext: true
+
+  # 7. 终止节点 (失败)
+  - id: "node_term_fail"
+    type: "TERMINAL"
+    name: "Login Failed"
+    resultTag: "FAIL_LOGIN"
+    saveContext: false
