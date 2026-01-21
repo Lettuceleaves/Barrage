@@ -7,12 +7,19 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 
 /**
- * 仿真上下文 (Zero-Copy Core)
+ * 仿真运行上下文 (Zero-Copy Core).
  * <p>
- * 职责：
- * 1. 作为 "视口" (View) 绑定到当前虚拟用户的 Slot 内存上。
- * 2. 提供对 Request Buffer (用户写) 和 Response Buffer (IO 线程写指针) 的访问。
- * 3. 桥接 NetworkInfrastructure 能力。
+ * 这是每个虚拟用户 (Agent) 在运行时持有的核心对象。
+ * <p>
+ * 核心设计职责：
+ * <ol>
+ * <li><b>视口 (View)：</b> 它并不直接持有数据，而是作为"游标"指向 {@link UserGroupContext}
+ * 中当前用户对应的内存槽位 (Slot)。</li>
+ * <li><b>零拷贝 IO 桥接：</b> 提供对 Request/Response Buffer 的访问。IO 线程直接将内核数据的地址写入
+ * Slot，Context 负责将其包装为 {@link MemorySegment} 供 Node 使用。</li>
+ * <li><b>基础设施访问：</b> 持有 {@link NetworkInfrastructure} 的引用，使 Node 能够发起 IO
+ * 请求。</li>
+ * </ol>
  */
 @SuppressFBWarnings("EI_EXPOSE_REP")
 public class SimulationContext {
@@ -30,16 +37,17 @@ public class SimulationContext {
     // 基础设施引用 (用于 Node 发起 IO)
     private NetworkInfrastructure networkInfra;
 
-    public SimulationContext() {}
+    public SimulationContext() {
+    }
 
     /**
-     * 上下文切换 (Context Switch)
+     * 上下文切换 (Context Switch)。
      * <p>
-     * 当虚拟线程被调度去处理某个用户时，调用此方法将 Context "对准" 该用户的内存槽位。
-     * 这是一个极低开销的操作 (两个赋值)。
+     * 当虚拟线程被调度去处理某个用户时，必须先调用此方法，将 Context "对准" 该用户的内存槽位。
+     * 这是一个极低开销的操作 (指针计算 + 赋值)，是实现 Thread-Per-Core 模拟百万用户的关键。
      *
-     * @param memoryBlock UserGroup 的共享大内存
-     * @param userIndex   目标用户索引
+     * @param memoryBlock UserGroup 的共享大内存段 (Base Address)
+     * @param userIndex   目标用户在组内的索引
      */
     public void wrap(MemorySegment memoryBlock, int userIndex) {
         this.memoryBlock = memoryBlock;
@@ -64,30 +72,37 @@ public class SimulationContext {
     // ==========================================
 
     /**
-     * 获取响应数据的长度
+     * 获取响应数据的长度。
      * <p>
-     * 数据来源：IO 线程在 handleCqe 时写入到 UserSlot Metadata 区域。
+     * 数据来源：底层 IO 线程在完成 Read 操作后，会将实际读取的字节数写入 UserSlot 的 Metadata 区域。
+     *
+     * @return 响应数据字节数
      */
     public long getDataLength() {
         return memoryBlock.get(ValueLayout.JAVA_LONG, currentSlotOffset + UserSlotLayout.OFFSET_RESP_LEN);
     }
 
     /**
-     * 获取响应数据的 Buffer (Zero-Copy View)
+     * 获取响应数据的缓冲区视图 (Zero-Copy View)。
      * <p>
-     * 原理：
-     * 1. 读取 IO 线程写入的物理内存地址 (Address) 和长度 (Length)。
-     * 2. 使用 FFM API 基于该地址构建一个新的 MemorySegment 视图。
+     * <b>原理：</b>
+     * <ol>
+     * <li>读取 IO 线程写入的物理内存地址 (Address) 和长度 (Length)。</li>
+     * <li>使用 FFM API ({@link MemorySegment#ofAddress}) 基于该地址构建一个新的 MemorySegment
+     * 视图。</li>
+     * </ol>
      * <p>
-     * ⚠️ 警告 (生命周期安全)：
-     * 返回的 Segment 直接指向 NetworkInfrastructure 内部的 RingBuffer。
-     * 必须在当前 Node 逻辑执行期间（即虚拟线程让出 CPU 之前）完成读取或解析。
-     * 一旦虚拟线程挂起或结束，IO 线程可能会覆盖这块内存。
+     * <b>⚠️ 安全警告 (生命周期)：</b>
+     * 返回的 Segment 直接指向 {@link NetworkInfrastructure} 内部的 RingBuffer。
+     * <b>必须</b> 在当前 Node 逻辑执行期间（即虚拟线程让出 CPU 之前）完成读取或解析。
+     * 一旦虚拟线程挂起或结束当前 tick，IO 线程可能会在后续循环中覆盖这块内存。
+     *
+     * @return 响应数据的内存段，如果无数据或异常则返回 {@link MemorySegment#NULL}
      */
     public MemorySegment getResponseBuffer() {
         // 1. 读取元数据：IO 线程把数据放在了哪？
         long addr = memoryBlock.get(ValueLayout.JAVA_LONG, currentSlotOffset + UserSlotLayout.OFFSET_RESP_PTR);
-        long len  = memoryBlock.get(ValueLayout.JAVA_LONG, currentSlotOffset + UserSlotLayout.OFFSET_RESP_LEN);
+        long len = memoryBlock.get(ValueLayout.JAVA_LONG, currentSlotOffset + UserSlotLayout.OFFSET_RESP_LEN);
 
         // 防御性检查
         if (len <= 0 || addr == 0) {
@@ -114,26 +129,32 @@ public class SimulationContext {
     // ==========================================
 
     /**
-     * 获取请求缓冲区 (Request Buffer)
+     * 获取请求缓冲区 (Request Buffer)。
      * <p>
-     * 用途：
-     * HttpNode 或 TemplateManager 将组装好的 HTTP 请求报文写入这里。
-     * 这块内存是分配在 UserSlot 内部的，属于用户私有，安全可靠。
+     * <b>用途：</b>
+     * 用于存放即将发送的 HTTP 请求报文。{@link com.barrage.engine.simulate.node.HttpNode} 或模板管理器
+     * 会将组装好的数据写入这块区域。这块内存是分配在 UserSlot 内部的，属于用户私有，线程安全。
+     *
+     * @return 请求缓冲区的内存切片
      */
     public MemorySegment getRequestBuffer() {
         return memoryBlock.asSlice(currentSlotOffset + UserSlotLayout.OFFSET_REQ_BUFFER, UserSlotLayout.REQ_CAPACITY);
     }
 
     /**
-     * 获取请求数据的数据视图 (用于发送)
+     * 获取准备发送的数据视图。
      * <p>
-     * 根据之前 setDataReference 设置的指针和长度，返回实际有效的数据切片。
+     * 根据之前 {@link #setDataReference(long, long)} 设置的指针和长度，返回实际有效的数据切片。
+     * 供 IO 线程读取以进行发送操作。
+     *
+     * @return 待发送数据的内存段
      */
     public MemorySegment getDataAsSegment() {
         long addr = memoryBlock.get(ValueLayout.JAVA_LONG, currentSlotOffset + UserSlotLayout.OFFSET_DATA_PTR);
-        long len  = memoryBlock.get(ValueLayout.JAVA_LONG, currentSlotOffset + UserSlotLayout.OFFSET_DATA_LEN);
+        long len = memoryBlock.get(ValueLayout.JAVA_LONG, currentSlotOffset + UserSlotLayout.OFFSET_DATA_LEN);
 
-        if (len <= 0) return MemorySegment.NULL;
+        if (len <= 0)
+            return MemorySegment.NULL;
 
         // 这里假设 setDataReference 存的是绝对地址 (基于 memoryBlock 的 slice 或 ofAddress)
         // 在目前的实现中，通常是调用 getRequestBuffer() 写入数据后，
@@ -146,9 +167,13 @@ public class SimulationContext {
     }
 
     /**
-     * 设置请求数据的引用 (Pointer)
+     * 设置请求数据的引用 (Pointer)。
      * <p>
-     * 告诉 Context："我把请求数据写在地址 X，长度为 Y，请在这个地址发包"。
+     * 告诉 Context："我已把请求数据写在地址 Address，长度为 Length，请记录下来"。
+     * IO 线程后续会读取这个记录来发起 send 系统调用。
+     *
+     * @param address 数据所在的绝对物理地址
+     * @param length  数据长度
      */
     public void setDataReference(long address, long length) {
         memoryBlock.set(ValueLayout.JAVA_LONG, currentSlotOffset + UserSlotLayout.OFFSET_DATA_PTR, address);
@@ -156,11 +181,14 @@ public class SimulationContext {
     }
 
     /**
-     * [Critical] 获取 Slot 的元数据区域
+     * [Critical] 获取当前 Slot 的元数据区域切片。
      * <p>
-     * 用途：
-     * 传给 IO 线程，让 IO 线程知道往哪里回写 "Response Address" 和 "Response Length"。
-     * IO 线程会直接操作这块内存。
+     * <b>用途：</b>
+     * 将这块内存暴露给底层 IO 线程。IO 线程在处理完 Read 事件后，会直接往这块内存的
+     * 特定偏移 (OFFSET_RESP_PTR, OFFSET_RESP_LEN) 写入数据。
+     * 实现了 User 线程与 IO 线程的高效交互。
+     *
+     * @return Slot 元数据区的内存段
      */
     public MemorySegment getSlotMetadataSegment() {
         // 返回整个 Slot 的切片，NetworkInfrastructure 知道具体的偏移量 (OFFSET_RESP_PTR 等)

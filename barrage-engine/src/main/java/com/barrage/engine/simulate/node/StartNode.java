@@ -6,12 +6,16 @@ import com.barrage.engine.simulate.context.SimulationContext;
 import java.util.List;
 
 /**
- * 起始节点 (StartNode)
+ * 起始节点 (Start Node).
  * <p>
- * 职责：
- * 1. 作为图的固定入口。
- * 2. 将新进来的虚拟用户立即导向第一个业务节点 (通常是 Index 0)。
- * 3. (可选) 这里也可以用来重置一些上下文计数器，但通常引擎在进入 Start 之前已经 reset 过了。
+ * 执行图的固定入口点。任何虚拟用户的生命周期都从此节点开始。
+ * <p>
+ * <b>职责：</b>
+ * <ol>
+ * <li>作为图的唯一入口。</li>
+ * <li>无业务逻辑 (No-op)，仅起到导流作用。</li>
+ * <li>将用户立即导向配置的第一个业务节点 (Index 0)。</li>
+ * </ol>
  */
 public class StartNode extends GraphNode {
 
@@ -21,12 +25,14 @@ public class StartNode extends GraphNode {
 
         // 强校验：Start 节点必须有且仅有一个出口，否则图无法启动
         if (transitionContexts == null || transitionContexts.isEmpty()) {
-            throw new IllegalArgumentException("StartNode must have at least 1 transition (the entry point of the flow).");
+            throw new IllegalArgumentException(
+                    "StartNode must have at least 1 transition (the entry point of the flow).");
         }
     }
 
     /**
      * 执行逻辑
+     * 
      * @param context 仿真上下文
      */
     @Override

@@ -20,14 +20,20 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
- * 网络基础设施层 (M:N 模型中的 N) - Zero-Copy RingBuffer Edition
+ * 网络基础设施层 (M:N 模型中的 N) - Zero-Copy RingBuffer Edition.
  * <p>
- * 架构特性：
- * 1. M:N 线程模型：M 个虚拟用户映射到 N 个物理 IO 线程。
- * 2. 极致零拷贝：IO 线程接收数据后，不拷贝到用户区，而是直接将 IO Buffer 的指针传递给用户。
- * 3. 环形缓冲：每个连接维护 4 个接收 Buffer，防止 User 还没读完就被 Kernel 覆盖。
+ * 负责管理底层的物理 IO 线程 (IoLane) 和 socket 连接池。它是连接虚拟用户 (User Layer) 和 操作系统内核 (Kernel
+ * Layer) 的桥梁。
+ * <p>
+ * <b>架构特性：</b>
+ * <ul>
+ * <li><b>M:N 线程模型：</b> 上层 M 个虚拟用户被动态映射到底层 N 个物理 IO 线程。通常 N = CPU Cores。</li>
+ * <li><b>极致零拷贝：</b> IO 线程读取到数据后，不进行内存拷贝，而是直接将 RingBuffer 的物理地址传递给用户态。</li>
+ * <li><b>环形缓冲 (Ring Buffer)：</b> 每个 Socket 连接维护深度的接收缓冲环，允许 User 线程和 IO
+ * 线程并行处理而不发生竞态覆盖。</li>
+ * </ul>
  */
-@SuppressFBWarnings({"EI_EXPOSE_REP", "MS_CANNOT_BE_FINAL"})
+@SuppressFBWarnings({ "EI_EXPOSE_REP", "MS_CANNOT_BE_FINAL" })
 public class NetworkInfrastructure implements AutoCloseable {
 
     private final List<IoLane> lanes;
@@ -59,15 +65,18 @@ public class NetworkInfrastructure implements AutoCloseable {
     }
 
     /**
-     * 提交请求 (Zero-Copy 指针传递版)
+     * 提交异步请求任务 (Zero-Copy 指针传递版)。
+     * <p>
+     * 将发送请求委托给底层的 IO 线程。该方法是非阻塞的，但返回的 Future 需要在虚拟线程中被 await。
      *
-     * @param userId       用户 ID
-     * @param reqData      请求数据 (发送 Payload)
+     * @param userId       发起请求的用户 ID (用于负载均衡路由)
+     * @param reqData      请求数据段 (发送 Payload)
      * @param userSlotMeta 用户 Slot 的元数据区域 (用于回写 Response 的 Address 和 Length)
+     * @return 一个 CompletableFuture，当请求发送完毕且<b>接收到响应头</b>时完成
      */
     public CompletableFuture<Void> submitRequest(long userId,
-                                                 MemorySegment reqData,
-                                                 MemorySegment userSlotMeta) {
+            MemorySegment reqData,
+            MemorySegment userSlotMeta) {
         // 简单的取模路由
         int laneIdx = (int) (userId % laneCount);
         return lanes.get(laneIdx).submitTask(userId, reqData, userSlotMeta);
@@ -76,7 +85,8 @@ public class NetworkInfrastructure implements AutoCloseable {
     @Override
     public void close() {
         running = false;
-        for (IoLane lane : lanes) lane.close();
+        for (IoLane lane : lanes)
+            lane.close();
     }
 
     // =========================================
@@ -203,7 +213,7 @@ public class NetworkInfrastructure implements AutoCloseable {
             long userData = cqe.userData;
             // 解码 userData
             // High 32: Type
-            // Low 32:  ConnIndex (16bit) | BufferIndex (16bit)
+            // Low 32: ConnIndex (16bit) | BufferIndex (16bit)
             int type = (int) (userData >>> 32);
             int combinedIdx = (int) userData;
             int connIdx = combinedIdx >> 16;
@@ -286,7 +296,8 @@ public class NetworkInfrastructure implements AutoCloseable {
             if (sqe == null) {
                 ring.submit();
                 sqe = ring.nextSqe();
-                if (sqe == null) throw new IOException("SQ Ring Full");
+                if (sqe == null)
+                    throw new IOException("SQ Ring Full");
             }
             return sqe;
         }
@@ -315,14 +326,17 @@ public class NetworkInfrastructure implements AutoCloseable {
             ConnectionSlot slot = slots[idx];
             while (!slot.pendingTasks.isEmpty()) {
                 slot.pendingTasks.poll().future.completeExceptionally(
-                        new IOException("IO Error: " + errCode)
-                );
+                        new IOException("IO Error: " + errCode));
             }
         }
 
         private void reconnect(int idx) {
             int oldFd = slots[idx].fd;
-            if (oldFd > 0) try { new NativeSocket(oldFd).close(); } catch (Exception ignored) {}
+            if (oldFd > 0)
+                try {
+                    new NativeSocket(oldFd).close();
+                } catch (Exception ignored) {
+                }
             slots[idx].fd = -1;
             setupConnectionSafe(idx);
         }
@@ -331,12 +345,20 @@ public class NetworkInfrastructure implements AutoCloseable {
             if (slots != null) {
                 for (ConnectionSlot slot : slots) {
                     if (slot != null && slot.fd > 0) {
-                        try { new NativeSocket(slot.fd).close(); } catch (Exception ignored) {}
+                        try {
+                            new NativeSocket(slot.fd).close();
+                        } catch (Exception ignored) {
+                        }
                     }
                 }
             }
-            try { if (ring != null) ring.close(); } catch (Exception ignored) {}
-            if (laneArena != null && laneArena.scope().isAlive()) laneArena.close();
+            try {
+                if (ring != null)
+                    ring.close();
+            } catch (Exception ignored) {
+            }
+            if (laneArena != null && laneArena.scope().isAlive())
+                laneArena.close();
         }
 
         public void close() {
@@ -345,7 +367,9 @@ public class NetworkInfrastructure implements AutoCloseable {
     }
 
     /**
-     * 连接槽位 (RingBuffer 状态管理)
+     * 连接槽位 (Connection Slot).
+     * <p>
+     * 维护单个 Socket 连接的运行时状态，包括文件描述符 (FD) 和接收缓冲区环。
      */
     private static class ConnectionSlot {
         int fd = -1;
@@ -362,7 +386,8 @@ public class NetworkInfrastructure implements AutoCloseable {
      * 内部任务载体
      */
     record IoTask(long userId,
-                  MemorySegment requestData,
-                  MemorySegment userSlotMeta, // 仅传入 Metadata 供回写指针
-                  CompletableFuture<Void> future) {}
+            MemorySegment requestData,
+            MemorySegment userSlotMeta, // 仅传入 Metadata 供回写指针
+            CompletableFuture<Void> future) {
+    }
 }

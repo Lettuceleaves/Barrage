@@ -3,9 +3,9 @@ ip = "172.27.48.1"
 port = 8089
 
 [engine]
-server_threads = 6
-client_threads = 6
-conns_per_client = 8
+server_threads = 8
+client_threads = 8
+conns_per_client = 5000
 step = 100000
 
 [performance]

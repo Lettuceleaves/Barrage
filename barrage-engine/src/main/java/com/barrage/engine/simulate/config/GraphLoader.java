@@ -16,7 +16,14 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * 执行图加载器 (已修复 TransitionContext 构造问题)
+ * 执行图加载器 (Graph Loader)。
+ * <p>
+ * 负责从外部配置文件 (如 YAML) 读取场景定义，并将其解析转换为运行时的 {@link ExecutionGraph} 对象。
+ * 包含 DTO (Data Transfer Object) 定义和转换逻辑。
+ *
+ * @author LettuceLeaves
+ * @version 1.0
+ * @since 2026/1/6
  */
 public class GraphLoader {
 
@@ -24,8 +31,9 @@ public class GraphLoader {
 
     /**
      * 加载入口
+     * 
      * @param configRootPath 配置文件根目录
-     * @param fileName 文件名 (如 scenario.yaml)
+     * @param fileName       文件名 (如 scenario.yaml)
      */
     public static ExecutionGraph load(String configRootPath, String fileName) {
         File configFile = new File(configRootPath, fileName);
@@ -65,24 +73,21 @@ public class GraphLoader {
         return switch (type) {
             case "START" -> new StartNode(
                     dto.name,
-                    toTransList(dto.transition)
-            );
+                    toTransList(dto.transition));
 
             case "TERMINAL" -> new TerminalNode(
                     dto.name,
                     dto.resultTag,
-                    dto.saveContext
-            );
+                    dto.saveContext);
 
             case "HTTP", "ACTION_HTTP" -> new HttpNode(
                     dto.name,
                     toTransList(dto.transition),
-                    dto.templateRef
-            );
+                    dto.templateRef);
 
             case "CONDITION", "LOGIC_CONDITION" -> {
-                byte[] expectedBytes = dto.expectedValue != null ?
-                        dto.expectedValue.getBytes(StandardCharsets.UTF_8) : new byte[0];
+                byte[] expectedBytes = dto.expectedValue != null ? dto.expectedValue.getBytes(StandardCharsets.UTF_8)
+                        : new byte[0];
 
                 List<TransitionContext> list = new ArrayList<>();
                 // 约定：Index 0=Match, Index 1=Mismatch
@@ -92,8 +97,7 @@ public class GraphLoader {
                 yield new ConditionNode(
                         dto.name,
                         list,
-                        expectedBytes
-                );
+                        expectedBytes);
             }
 
             case "CHANCE", "LOGIC_CHANCE" -> {
@@ -115,13 +119,15 @@ public class GraphLoader {
     // --- Helpers (Fixed) ---
 
     private static TransitionContext toTransObj(TransitionDTO t) {
-        if (t == null) return null;
+        if (t == null)
+            return null;
         // 修复：参数顺序 (next, mode, value)
         return new TransitionContext(t.next, t.mode, t.value);
     }
 
     private static List<TransitionContext> toTransList(TransitionDTO t) {
-        if (t == null) return Collections.emptyList();
+        if (t == null)
+            return Collections.emptyList();
         // 修复：参数顺序 (next, mode, value)
         return List.of(new TransitionContext(t.next, t.mode, t.value));
     }

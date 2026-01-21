@@ -7,8 +7,18 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * 随机分流节点 (ChanceNode)
- * 根据权重列表随机选择一条路径。
+ * 随机分流节点 (Chance Node)。
+ * <p>
+ * 实现基于权重的概率跳转。类似于 Nginx 的 {@code split_clients} 或 A/B Testing 分流。
+ * <p>
+ * <b>性能优化：</b>
+ * 构造时会将权重列表预处理为原生的 {@code int[]} 数组，并在运行时使用
+ * 轮盘赌算法 (Roulette Wheel Selection) 进行 O(N) 复杂度的选择。
+ * 配合 {@link java.util.concurrent.ThreadLocalRandom} 保证高并发下的随机数生成性能。
+ *
+ * @author LettuceLeaves
+ * @version 1.0
+ * @since 2026/1/6
  */
 public class ChanceNode extends GraphNode {
 
@@ -48,8 +58,9 @@ public class ChanceNode extends GraphNode {
         }
     }
 
-    public List<Integer> getWeights() { return weights; }
-
+    public List<Integer> getWeights() {
+        return weights;
+    }
 
     @Override
     public void run(SimulationContext context) {
@@ -79,6 +90,7 @@ public class ChanceNode extends GraphNode {
         // 这里的 selectedIndex 对应 transitionContexts 的下标
         context.setNextTransitionIndex(selectedIndex);
     }
+
     @Override
     protected void printExecutionDetails(SimulationContext context) {
         System.out.printf("    [Debug] Roulette Selected Branch: #%d%n",

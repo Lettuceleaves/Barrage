@@ -9,11 +9,24 @@ import java.lang.foreign.MemorySegment;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+/**
+ * HTTP 请求节点 (Http Action Node).
+ * <p>
+ * 仿真引擎中最核心的动作节点，负责发起真实的网络请求。
+ * <p>
+ * <b>执行流程：</b>
+ * <ol>
+ * <li><b>请求构建：</b> 调用模板引擎生成请求报文 (如果尚未生成)，并写入用户的 Request Buffer。</li>
+ * <li><b>请求发送：</b> 将 Request Buffer 指针传递给底层 IO 线程
+ * ({@link NetworkInfrastructure})。</li>
+ * <li><b>异步等待：</b> 挂起虚拟线程，等待 IO 完成。</li>
+ * <li><b>响应处理：</b> IO 完成后被唤醒，解析响应状态码，更新 Context 状态。</li>
+ * </ol>
+ */
 public class HttpNode extends GraphNode {
 
     private final String templateRef;
-    private static final ThreadLocal<HttpResponseView> VIEW_HOLDER =
-            ThreadLocal.withInitial(HttpResponseView::new);
+    private static final ThreadLocal<HttpResponseView> VIEW_HOLDER = ThreadLocal.withInitial(HttpResponseView::new);
 
     public HttpNode(String name, List<TransitionContext> transitionContexts, String templateRef) {
         super(name, "HTTP", transitionContexts);
@@ -46,8 +59,7 @@ public class HttpNode extends GraphNode {
             infra.submitRequest(
                     context.getUserId(),
                     requestData,
-                    context.getSlotMetadataSegment()
-            ).get(); // <--- 挂起等待
+                    context.getSlotMetadataSegment()).get(); // <--- 挂起等待
 
             // =================================================================
             // 3. 处理响应 (Zero-Copy View)
@@ -84,7 +96,11 @@ public class HttpNode extends GraphNode {
     }
 
     /**
-     * [Mock] 模拟模板引擎：将 HTTP 报文写入用户的 RequestBuffer
+     * [Mock] 模拟模板引擎：将 HTTP 报文写入用户的 RequestBuffer。
+     * <p>
+     * 实际项目中，这里应该调用 TemplateManager 根据 {@code templateRef} 动态生成数据。
+     *
+     * @param context 仿真上下文
      */
     private void renderMockRequest(SimulationContext context) {
         // 构造一个合法的 HTTP 请求 (Host 改为你的目标地址)
@@ -114,7 +130,9 @@ public class HttpNode extends GraphNode {
         context.setNextTransitionIndex(failIndex);
     }
 
-    public String getTemplateRef() { return templateRef; }
+    public String getTemplateRef() {
+        return templateRef;
+    }
 
     @Override
     protected void printExecutionDetails(SimulationContext context) {

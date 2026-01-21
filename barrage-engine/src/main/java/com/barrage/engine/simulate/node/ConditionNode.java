@@ -8,11 +8,17 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * 智能条件节点 (Smart Condition Node) - Final
+ * 条件判断节点 (Condition Node).
  * <p>
- * 逻辑优先级：
- * 1. 状态码匹配：如果 expectedValue 是数字 (如 "200")，优先比对 context.getStatus()。
- * 2. 二进制匹配：如果状态码不匹配，再比对 Body (SIMD Zero-Copy)。
+ * 提供复杂的逻辑判断能力，支持根据上游节点的执行结果进行分支。
+ * <p>
+ * <b>判断逻辑 (优先级)：</b>
+ * <ol>
+ * <li><b>状态码匹配 (High Priority)：</b> 如果预期值 {@code expectedValue} 能解析为数字 (如
+ * "200")，则直接与 {@link SimulationContext#getStatus()} 进行比较。这是极速的寄存器级比较。</li>
+ * <li><b>内容匹配 (Deep Content)：</b> 如果状态码不匹配或预期值为字符串，则对响应 Body 进行二进制比对 (SIMD
+ * 优化)。</li>
+ * </ol>
  */
 public class ConditionNode extends GraphNode {
 
@@ -45,7 +51,9 @@ public class ConditionNode extends GraphNode {
     }
 
     /**
-     * 获取预期的二进制数据段 (Getter)
+     * 获取预期的二进制数据段 (Getter)。
+     *
+     * @return 预期值的内存片段
      */
     public MemorySegment getExpectedSegment() {
         return expectedSegment;

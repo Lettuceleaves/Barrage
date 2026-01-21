@@ -6,8 +6,17 @@ import com.barrage.engine.simulate.context.SimulationContext;
 import java.util.List;
 
 /**
- * 图节点基类 (Refactored)
- * 引入模板方法模式处理 Debug 逻辑。
+ * 图节点基类 (Graph Node)。
+ * <p>
+ * 所有业务节点的抽象父类。采用了 <b>模板方法模式 (Template Method)</b> 来统一处理
+ * 节点的通用逻辑（如性能打点、调试日志、上下文检查等），将具体的业务实现下放给子类。
+ *
+ * @author LettuceLeaves
+ * @version 1.0
+ * @since 2026/1/6
+ * @see HttpNode
+ * @see ConditionNode
+ * @see ChanceNode
  */
 public abstract class GraphNode {
 
@@ -22,8 +31,19 @@ public abstract class GraphNode {
     }
 
     /**
-     * [Template Method] 统一执行入口
-     * 包含：日志、计时、业务逻辑调用、决策打印
+     * [Template Method] 执行节点的标准流程。
+     * <p>
+     * 包含以下步骤：
+     * <ol>
+     * <li>Debug 日志 (Enter Node)。</li>
+     * <li>记录开始时间。</li>
+     * <li>调用抽象方法 {@link #run(SimulationContext)} 执行具体业务。</li>
+     * <li>记录耗时并打印性能日志。</li>
+     * <li>调用 {@link #printExecutionDetails(SimulationContext)} 打印业务细节。</li>
+     * </ol>
+     *
+     * @param context 仿真上下文
+     * @param isDebug 是否开启调试模式
      */
     public void execute(SimulationContext context, boolean isDebug) {
         long uid = context.getUserId();
@@ -53,7 +73,12 @@ public abstract class GraphNode {
     }
 
     /**
-     * [Abstract] 核心业务逻辑
+     * [Abstract] 核心业务逻辑实现。
+     * <p>
+     * 子类必须实现此方法以完成具体的节点功能 (如发送 HTTP 请求、随机跳转、条件判断等)。
+     * 执行完成后，子类负责设置 context 中的 nextTransitionIndex。
+     *
+     * @param context 仿真上下文
      */
     public abstract void run(SimulationContext context);
 
@@ -65,7 +90,15 @@ public abstract class GraphNode {
     }
 
     // Getters
-    public String getName() { return name; }
-    public String getType() { return type; }
-    public List<TransitionContext> getTransitionContexts() { return transitionContexts; }
+    public String getName() {
+        return name;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public List<TransitionContext> getTransitionContexts() {
+        return transitionContexts;
+    }
 }

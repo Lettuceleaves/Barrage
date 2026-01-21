@@ -10,18 +10,27 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 执行图工具类
- * 负责图的合法性校验和可视化打印
+ * 执行图工具类。
+ * <p>
+ * 提供对 {@link ExecutionGraph} 的静态辅助方法，主要功能包括：
+ * <ul>
+ * <li><b>校验 (Validation)：</b> 检查图的完整性 (断链检查、入口检查)。</li>
+ * <li><b>可视化 (Visualization)：</b> 在控制台打印图的树状结构或详细属性。</li>
+ * </ul>
  */
 public class GraphUtils {
 
     /**
-     * 校验图的合法性
-     * 1. 起始节点必须存在
-     * 2. 所有节点的 Transition 指向的 next 节点 ID 必须存在于图中
+     * 校验图的合法性。
+     * <p>
+     * 执行以下检查：
+     * <ol>
+     * <li><b>入口检查：</b> 起始节点 (StartNode) 必须存在且 ID 有效。</li>
+     * <li><b>连通性检查：</b> 遍历所有节点的 Transition，确保指向的 next 节点 ID 都真实存在于图中。</li>
+     * </ol>
      *
      * @param graph 要校验的执行图
-     * @throws IllegalStateException 如果校验失败，抛出异常并包含详细错误信息
+     * @throws IllegalStateException 如果校验失败，抛出包含详细错误信息的异常
      */
     public static void validate(ExecutionGraph graph) {
         List<String> errors = new ArrayList<>();
@@ -33,7 +42,8 @@ public class GraphUtils {
 
         // 2. 遍历所有节点检查连通性
         for (GraphNode node : graph.getAllNodes().values()) {
-            if (node.getTransitionContexts() == null) continue;
+            if (node.getTransitionContexts() == null)
+                continue;
 
             for (TransitionContext ctx : node.getTransitionContexts()) {
                 String nextId = ctx.getNext();
@@ -60,7 +70,12 @@ public class GraphUtils {
     }
 
     /**
-     * 在控制台打印图的结构 (从 StartNode 开始)
+     * 在控制台打印图的结构树 (从 StartNode 开始)。
+     * <p>
+     * 使用类似于 {@code tree} 命令的格式展示节点层级关系和流转模式。
+     * 具备循环引用检测能力，防止无限递归。
+     *
+     * @param graph 要打印的执行图
      */
     public static void printGraph(ExecutionGraph graph) {
         System.out.println("\n=== Execution Graph Visualization: " + graph.getGraphName() + " ===");
@@ -78,12 +93,16 @@ public class GraphUtils {
     }
 
     /**
-     * 递归打印节点
-     * @param prefix 前缀字符 (用于缩进)
-     * @param isTail 是否是当前层级的最后一个元素
-     * @param path   当前的遍历路径 (用于检测循环)
+     * 递归打印节点辅助方法。
+     *
+     * @param graph  执行图引用
+     * @param node   当前节点
+     * @param prefix 前缀字符 (用于缩进和连接线)
+     * @param isTail 是否是当前层级的最后一个元素 (决定使用 └── 还是 ├──)
+     * @param path   当前的遍历路径 (用于检测循环回路)
      */
-    private static void printNodeRecursive(ExecutionGraph graph, GraphNode node, String prefix, boolean isTail, Set<String> path) {
+    private static void printNodeRecursive(ExecutionGraph graph, GraphNode node, String prefix, boolean isTail,
+            Set<String> path) {
         // 1. 打印当前节点
         System.out.println(prefix + (isTail ? "└── " : "├── ") + formatNode(node));
 
@@ -125,7 +144,9 @@ public class GraphUtils {
 
     public static void printDetail(ExecutionGraph graph) {
         System.out.println("\n=== Graph Details: " + graph.getGraphName() + " ===");
-        System.out.println("Entry Node: " + graph.getStartNode().getName()); // 假设 ExecutionGraph 加了 getStartNodeId()，如果没有就打印 getStartNode().getName()
+        System.out.println("Entry Node: " + graph.getStartNode().getName()); // 假设 ExecutionGraph 加了
+                                                                             // getStartNodeId()，如果没有就打印
+                                                                             // getStartNode().getName()
         System.out.println("Total Nodes: " + graph.getAllNodes().size());
         System.out.println("------------------------------------------------------");
 
@@ -142,7 +163,7 @@ public class GraphUtils {
         System.out.printf("NODE [%s] (%s)\n", node.getName(), node.getType());
 
         // 如果 GraphNode 有 getId() 方法，这里打印 ID 更有用
-        // System.out.printf("  ID: %s\n", node.getId());
+        // System.out.printf(" ID: %s\n", node.getId());
 
         // 2. 根据类型打印特有属性
         if (node instanceof HttpNode httpNode) {

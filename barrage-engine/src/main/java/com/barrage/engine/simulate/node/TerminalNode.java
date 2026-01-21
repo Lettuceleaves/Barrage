@@ -1,17 +1,21 @@
 package com.barrage.engine.simulate.node;
 
-
 import com.barrage.engine.simulate.context.SimulationContext;
 
 import java.util.Collections;
 
 /**
- * 终止节点 (TerminalNode)
+ * 终止节点 (Terminal Node).
  * <p>
- * 职责：
- * 1. 标记当前虚拟用户执行结束。
- * 2. 写入最终结果状态码 (Status)。
- * 3. 将 NextTransitionIndex 设置为哨兵值 (如 -1)，中断引擎循环。
+ * 标志着一次用户模拟流程的结束。
+ * <p>
+ * <b>行为：</b>
+ * <ol>
+ * <li><b>设置哨兵：</b> 将 NextIndex 设置为 {@link #END_OF_FLOW_INDEX}，通知引擎中断循环。</li>
+ * <li><b>结果打标：</b> 记录最终的执行结果 ({@code resultTag})，供监控系统统计成功率。</li>
+ * <li><b>现场保留 (可选)：</b> 如果配置了 {@code saveContext}，引擎会在重置前转储当前上下文快照以供
+ * Debug。</li>
+ * </ol>
  */
 public class TerminalNode extends GraphNode {
 
@@ -35,8 +39,13 @@ public class TerminalNode extends GraphNode {
         this.resultTagCode = resultTag != null ? resultTag.hashCode() : 0;
     }
 
-    public String getResultTag() { return resultTag; }
-    public boolean isSaveContext() { return saveContext; }
+    public String getResultTag() {
+        return resultTag;
+    }
+
+    public boolean isSaveContext() {
+        return saveContext;
+    }
 
     @Override
     public void run(SimulationContext context) {
