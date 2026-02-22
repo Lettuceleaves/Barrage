@@ -98,19 +98,19 @@ public class NetworkInfrastructure implements AutoCloseable {
         private final int port;
         private final int maxConns;
 
-        // 无锁队列
+        // 无锁队列：任务 & 重连结果
         private final Queue<IoTask> taskQueue = new ConcurrentLinkedQueue<>();
+        private final Queue<ReconnectResult> reconnectResultQueue = new ConcurrentLinkedQueue<>();
 
         // 线程封闭资源
         private IoUring ring;
-        private Arena laneArena; // 必须是 Shared，因为 User Thread 要读取这里的内存
+        private Arena laneArena; // Shared Arena
         private ConnectionSlot[] slots;
 
         // 常量定义
         private static final int EVENT_READ = 1;
         private static final int EVENT_WRITE = 2;
 
-        // 每个连接的 Ring Buffer 深度 (防止覆盖)
         private static final int RING_DEPTH = 4;
         private static final int READ_BUFFER_SIZE = 4096;
 
@@ -129,29 +129,25 @@ public class NetworkInfrastructure implements AutoCloseable {
 
         @Override
         public void run() {
-            // 关键：使用 Shared Arena，让虚拟线程可以 "偷看" IO 线程的内存
             this.laneArena = Arena.ofShared();
 
             try {
                 this.ring = new IoUring(BasicConfig.getQUEUE_DEPTH());
                 this.slots = new ConnectionSlot[maxConns];
 
-                // 预分配大块内存 (Slab Allocation)
-                // 总大小 = 连接数 * 深度 * 单个Buffer大小
+                // Slab Allocation
                 long totalSize = (long) maxConns * RING_DEPTH * READ_BUFFER_SIZE;
                 MemorySegment globalBuffer = laneArena.allocate(totalSize, 64);
 
-                // 初始化连接
+                // 初始化连接 (首次启动仍同步，保证基本可用性，或者也可改为异步)
                 for (int i = 0; i < maxConns; i++) {
                     slots[i] = new ConnectionSlot(RING_DEPTH);
-
-                    // 切分内存给 Ring Buffers
                     for (int r = 0; r < RING_DEPTH; r++) {
                         long offset = ((long) i * RING_DEPTH * READ_BUFFER_SIZE) + ((long) r * READ_BUFFER_SIZE);
                         slots[i].ringBuffers[r] = globalBuffer.asSlice(offset, READ_BUFFER_SIZE);
                     }
-
-                    setupConnectionSafe(i);
+                    // 初始同步连接
+                    setupConnectionSync(i);
                 }
 
                 ring.submit();
@@ -161,19 +157,22 @@ public class NetworkInfrastructure implements AutoCloseable {
                 while (running) {
                     boolean busy = false;
 
-                    // 1. 处理发送任务
+                    // 1. 处理重连完成的 FD
+                    busy |= processReconnectQueue();
+
+                    // 2. 处理发送任务
                     busy |= processTaskQueue();
 
-                    // 2. 提交到内核
+                    // 3. 提交到内核
                     ring.submit();
 
-                    // 3. 处理完成事件
+                    // 4. 处理完成事件
                     while (ring.peekCqe(cqe)) {
                         handleCqe(cqe);
                         busy = true;
                     }
 
-                    // 4. 自旋等待 (为了低延迟)
+                    // 5. 自旋等待
                     if (!busy) {
                         Thread.onSpinWait();
                     }
@@ -185,6 +184,38 @@ public class NetworkInfrastructure implements AutoCloseable {
             }
         }
 
+        private boolean processReconnectQueue() {
+            ReconnectResult res;
+            boolean workDone = false;
+            while ((res = reconnectResultQueue.poll()) != null) {
+                int idx = res.slotIdx;
+                int newFd = res.newFd;
+
+                // 关闭旧的（如果存在）
+                int oldFd = slots[idx].fd;
+                if (oldFd > 0) {
+                    try {
+                        new NativeSocket(oldFd).close();
+                    } catch (Exception ignored) {
+                    }
+                }
+
+                slots[idx].fd = newFd;
+                // 重新提交 Read 请求
+                if (newFd > 0) {
+                    try {
+                        prepRead(newFd, idx, 0, slots[idx].ringBuffers[0]);
+                        System.out.printf("[IoLane-%d] Slot %d reconnected async (FD=%d)%n", id, idx, newFd);
+                    } catch (IOException e) {
+                        // 如果这时候还出错，只能再重试
+                        triggerAsyncReconnect(idx);
+                    }
+                }
+                workDone = true;
+            }
+            return workDone;
+        }
+
         private boolean processTaskQueue() {
             IoTask task;
             int processed = 0;
@@ -193,17 +224,18 @@ public class NetworkInfrastructure implements AutoCloseable {
                 ConnectionSlot slot = slots[connIdx];
 
                 if (slot.fd <= 0) {
-                    task.future.completeExceptionally(new IOException("Conn closed"));
+                    // 连接不可用，直接报错，让上层（Agent）重试或处理
+                    task.future.completeExceptionally(new IOException("Connection unavailable (reconnecting)"));
                     continue;
                 }
 
                 slot.pendingTasks.offer(task);
                 try {
-                    // 发送请求数据
                     prepSend(slot.fd, connIdx, task.requestData);
                 } catch (IOException e) {
                     task.future.completeExceptionally(e);
-                    slot.pendingTasks.pollLast();
+                    slot.pendingTasks.pollLast(); // Revert offer
+                    handleIoError(connIdx, -1); // 触发重连
                 }
             }
             return processed > 0;
@@ -211,9 +243,6 @@ public class NetworkInfrastructure implements AutoCloseable {
 
         private void handleCqe(IoUring.Cqe cqe) {
             long userData = cqe.userData;
-            // 解码 userData
-            // High 32: Type
-            // Low 32: ConnIndex (16bit) | BufferIndex (16bit)
             int type = (int) (userData >>> 32);
             int combinedIdx = (int) userData;
             int connIdx = combinedIdx >> 16;
@@ -233,48 +262,31 @@ public class NetworkInfrastructure implements AutoCloseable {
                     return;
                 }
 
-                // ============================================
-                // 核心逻辑：Zero-Copy Pointer Passing
-                // ============================================
+                // Zero-Copy Pointer Passing
                 if (!slot.pendingTasks.isEmpty()) {
                     IoTask task = slot.pendingTasks.poll();
-
-                    // 1. 获取当前 Ring Buffer 的物理地址
                     MemorySegment activeBuffer = slot.ringBuffers[bufIdx];
-                    long physAddr = activeBuffer.address();
-
-                    // 2. 直接将 Address 和 Length 写入用户 Slot 的 Metadata 区域
-                    // UserSlotLayout.OFFSET_RESP_PTR = 64
-                    // UserSlotLayout.OFFSET_RESP_LEN = 72
-                    task.userSlotMeta.set(ValueLayout.JAVA_LONG, UserSlotLayout.OFFSET_RESP_PTR, physAddr);
+                    task.userSlotMeta.set(ValueLayout.JAVA_LONG, UserSlotLayout.OFFSET_RESP_PTR,
+                            activeBuffer.address());
                     task.userSlotMeta.set(ValueLayout.JAVA_LONG, UserSlotLayout.OFFSET_RESP_LEN, (long) len);
-
-                    // 3. 唤醒虚拟线程 (它将直接读取 activeBuffer 里的数据)
                     task.future.complete(null);
                 }
 
-                // 4. 准备下一次 Read
-                // 使用 Ring 中的下一个 Buffer，避免立即覆盖当前数据
+                // Next Read
                 int nextBufIdx = (bufIdx + 1) % RING_DEPTH;
-                MemorySegment nextBuffer = slot.ringBuffers[nextBufIdx];
-
                 try {
-                    prepRead(slot.fd, connIdx, nextBufIdx, nextBuffer);
+                    prepRead(slot.fd, connIdx, nextBufIdx, slot.ringBuffers[nextBufIdx]);
                 } catch (IOException e) {
                     handleIoError(connIdx, -1);
                 }
-
-            } else if (type == EVENT_WRITE) {
-                // Write 完成，通常不需要操作，除非要处理写回压
             }
         }
 
-        // --- Low Level IO Helpers ---
+        // --- Low Level Setup ---
 
         private void prepSend(int fd, int connIdx, MemorySegment data) throws IOException {
             MemorySegment sqe = getSqe();
             ring.prepSend(sqe, fd, data, (int) data.byteSize(), 0);
-            // UserData: Type=WRITE | ConnIdx
             long userData = ((long) EVENT_WRITE << 32) | (connIdx << 16);
             sqe.set(ValueLayout.JAVA_LONG, NativeConstants.SQE_OFF_USER_DATA, userData);
         }
@@ -282,12 +294,8 @@ public class NetworkInfrastructure implements AutoCloseable {
         private void prepRead(int fd, int connIdx, int bufIdx, MemorySegment buffer) throws IOException {
             MemorySegment sqe = getSqe();
             ring.prepRead(sqe, fd, buffer, (int) buffer.byteSize(), 0);
-
-            // UserData: Type=READ | ConnIdx | BufIdx
-            // 将 Buffer Index 编码进 userData，这样 handleCqe 才知道是哪个 buffer 回来了
             long combinedIdx = (connIdx << 16) | bufIdx;
             long userData = ((long) EVENT_READ << 32) | combinedIdx;
-
             sqe.set(ValueLayout.JAVA_LONG, NativeConstants.SQE_OFF_USER_DATA, userData);
         }
 
@@ -302,46 +310,87 @@ public class NetworkInfrastructure implements AutoCloseable {
             return sqe;
         }
 
-        // --- Connection Management ---
+        // --- Connection Management (Async Healer) ---
 
-        private void setupConnectionSafe(int idx) {
+        private void setupConnectionSync(int idx) {
             try {
                 NativeSocket s = new NativeSocket();
                 s.setReuseAddr();
                 if (s.connect(ip, port)) {
                     slots[idx].fd = s.getFd();
-                    // 初始使用 Buffer 0
                     prepRead(slots[idx].fd, idx, 0, slots[idx].ringBuffers[0]);
                 } else {
-                    System.err.println("[IoLane] Connect failed for slot " + idx);
+                    System.err.println("[IoLane] Initial connect failed for slot " + idx + ", scheduling async retry.");
                     slots[idx].fd = -1;
+                    triggerAsyncReconnect(idx);
                 }
             } catch (Exception e) {
                 slots[idx].fd = -1;
+                triggerAsyncReconnect(idx);
             }
+        }
+
+        /**
+         * 触发异步重连 (Non-Blocking)
+         * 将耗时的 connect 操作甩给虚拟线程去做
+         */
+        private void triggerAsyncReconnect(int idx) {
+            // 防止重复触发? 简单起见，如果已经是 -1 可能正在连，但这里简化处理
+            if (slots[idx].fd == -1) {
+                // Check if already regenerating?
+                // For simplicity, allowed.
+            }
+            slots[idx].fd = -1; // Ensure marked as down
+
+            // Fail all pending
+            ConnectionSlot slot = slots[idx];
+            while (!slot.pendingTasks.isEmpty()) {
+                slot.pendingTasks.poll().future.completeExceptionally(new IOException("Conn Reset"));
+            }
+
+            // Start Healer Task
+            Thread.ofVirtual().start(() -> {
+                // Backoff loop
+                int attempt = 0;
+                while (running) {
+                    attempt++;
+                    try {
+                        if (attempt > 1)
+                            Thread.sleep(Math.min(attempt * 100, 2000));
+
+                        NativeSocket s = new NativeSocket();
+                        s.setReuseAddr();
+                        if (s.connect(ip, port)) {
+                            // Success! Enqueue result
+                            reconnectResultQueue.offer(new ReconnectResult(idx, s.getFd()));
+                            break; // Exit healer thread
+                        } else {
+                            s.close();
+                        }
+                    } catch (Exception e) {
+                        try {
+                            Thread.sleep(500);
+                        } catch (InterruptedException ignored) {
+                        }
+                    }
+                }
+            });
         }
 
         private void handleIoError(int idx, int errCode) {
-            reconnect(idx);
-            ConnectionSlot slot = slots[idx];
-            while (!slot.pendingTasks.isEmpty()) {
-                slot.pendingTasks.poll().future.completeExceptionally(
-                        new IOException("IO Error: " + errCode));
-            }
-        }
-
-        private void reconnect(int idx) {
-            int oldFd = slots[idx].fd;
-            if (oldFd > 0)
+            // System.err.printf("[IoLane-%d] Error on slot %d: %d%n", id, idx, errCode);
+            long oldFd = slots[idx].fd;
+            if (oldFd > 0) {
                 try {
-                    new NativeSocket(oldFd).close();
+                    new NativeSocket((int) oldFd).close();
                 } catch (Exception ignored) {
                 }
-            slots[idx].fd = -1;
-            setupConnectionSafe(idx);
+            }
+            triggerAsyncReconnect(idx);
         }
 
         private void closeResources() {
+            // Cleanup logic...
             if (slots != null) {
                 for (ConnectionSlot slot : slots) {
                     if (slot != null && slot.fd > 0) {
@@ -364,6 +413,9 @@ public class NetworkInfrastructure implements AutoCloseable {
         public void close() {
             running = false;
         }
+    }
+
+    record ReconnectResult(int slotIdx, int newFd) {
     }
 
     /**
