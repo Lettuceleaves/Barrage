@@ -1,5 +1,7 @@
 package com.barrage.protocol.HTTP;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
@@ -42,6 +44,7 @@ public class HttpResponseView {
      * @param segment 包含 HTTP 响应数据的内存段 (通常是 Slice)
      * @param length  有效数据长度 (因为 segment 可能比实际数据大)
      */
+    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Zero-copy design: view intentionally wraps external MemorySegment without copying")
     public void wrap(MemorySegment segment, int length) {
         this.segment = segment;
         this.length = length;

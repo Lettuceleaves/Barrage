@@ -3,6 +3,7 @@ package com.barrage.api;
 import com.barrage.api.handler.ConfigHandler;
 import com.barrage.api.handler.ControlHandler;
 import com.barrage.api.handler.SimulateHandler;
+import com.barrage.api.handler.StaticFileHandler;
 import com.barrage.kernel.config.basic.BasicConfig;
 import com.sun.net.httpserver.HttpServer;
 
@@ -72,6 +73,9 @@ public class BarrageApiServer {
         server.createContext("/api/control",  controlHandler);
         // /api/simulate/* 路由（场景文件管理 + 模拟测试启停）
         server.createContext("/api/simulate", simulateHandler);
+
+        // 静态文件路由（前端 SPA），最短前缀兜底
+        server.createContext("/", new StaticFileHandler());
 
         // 5. 配置线程池（避免阻塞 I/O 造成饥饿）
         server.setExecutor(Executors.newFixedThreadPool(

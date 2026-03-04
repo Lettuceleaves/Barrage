@@ -79,4 +79,54 @@
         </plugins>
     </build>
 
+    <profiles>
+        <profile>
+            <id>native</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                        <version>0.10.3</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <imageName>barrage-api</imageName>
+                            <mainClass>com.barrage.api.BarrageApiServer</mainClass>
+                            <buildArgs>
+                                <arg>-H:+UnlockExperimentalVMOptions</arg>
+                                <arg>-H:+SharedArenaSupport</arg>
+                                <arg>-H:+ForeignAPISupport</arg>
+
+                                <arg>--enable-native-access=ALL-UNNAMED</arg>
+                                <arg>-O4</arg>
+
+                                <arg>--initialize-at-run-time=com.barrage.protocol.HTTP.HttpMessage,com.barrage.kernel.io.NativeSocket,com.barrage.engine.ServerEngine</arg>
+
+                                <arg>--no-fallback</arg>
+                            </buildArgs>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <version>3.5.1</version>
+                        <executions>
+                            <execution>
+                                <phase>package</phase>
+                                <goals><goal>shade</goal></goals>
+                                <configuration>
+                                    <transformers>
+                                        <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                            <mainClass>com.barrage.api.BarrageApiServer</mainClass>
+                                        </transformer>
+                                    </transformers>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
 </project>

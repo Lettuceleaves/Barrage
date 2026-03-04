@@ -1,4 +1,65 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <FindBugsFilter>
-  <!-- Add any exclusions here. Empty by default. -->
+  <!-- simulate 包：零拷贝设计，暴露内部引用是有意为之 -->
+  <Match>
+    <Package name="~com\.barrage\.engine\.simulate\..*"/>
+    <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+  </Match>
+
+  <!-- SimulationEngine：同理，直接持有 graph 引用 -->
+  <Match>
+    <Class name="com.barrage.engine.SimulationEngine"/>
+    <Bug pattern="EI_EXPOSE_REP2"/>
+  </Match>
+
+  <!-- Jackson DTO 公共字段由反序列化写入，SpotBugs 无法感知 -->
+  <Match>
+    <Class name="~com\.barrage\.engine\.simulate\.config\.GraphLoader\$.*DTO"/>
+    <Bug pattern="UWF_UNWRITTEN_PUBLIC_OR_PROTECTED_FIELD"/>
+  </Match>
+
+  <!-- 终端调试输出使用 \n 是刻意的（保持一致的终端排版） -->
+  <Match>
+    <Class name="com.barrage.engine.simulate.GraphUtils"/>
+    <Bug pattern="VA_FORMAT_STRING_USES_NEWLINE"/>
+  </Match>
+
+  <!-- 内部节点构造器抛异常属于 fail-fast 设计，不存在 finalizer 攻击风险 -->
+  <Match>
+    <Package name="~com\.barrage\.engine\.simulate\.node"/>
+    <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+  </Match>
+
+  <!-- 防御性 catch(Exception) 在网络 I/O 上下文中是合理的 -->
+  <Match>
+    <Or>
+      <Class name="com.barrage.engine.simulate.node.HttpNode"/>
+      <Class name="com.barrage.engine.simulate.pool.NetworkInfrastructure$IoLane"/>
+    </Or>
+    <Bug pattern="REC_CATCH_EXCEPTION"/>
+  </Match>
+
+  <!-- TerminalNode 中的 dead store 是后续开发的占位 -->
+  <Match>
+    <Class name="com.barrage.engine.simulate.node.TerminalNode"/>
+    <Bug pattern="DLS_DEAD_LOCAL_STORE"/>
+  </Match>
+
+  <!-- 单例 getInstance() 返回内部实例是设计意图 -->
+  <Match>
+    <Class name="com.barrage.api.service.EngineService"/>
+    <Bug pattern="MS_EXPOSE_REP"/>
+  </Match>
+
+  <!-- 测试入口类，格式字符串和 dead store 无需关注 -->
+  <Match>
+    <Class name="com.barrage.api.test.ApiTestMain"/>
+    <Bug pattern="DLS_DEAD_LOCAL_STORE,VA_FORMAT_STRING_USES_NEWLINE"/>
+  </Match>
+
+  <!-- HttpUtil.parseBody 中 contentLength 是已知的 dead store -->
+  <Match>
+    <Class name="com.barrage.api.util.HttpUtil"/>
+    <Bug pattern="DLS_DEAD_LOCAL_STORE"/>
+  </Match>
 </FindBugsFilter>

@@ -38,6 +38,10 @@ test-results-native
 
 # tmp
 tmp
+tmp/
 
 # prompt
 prompts.txt
+
+.claude/
+node_modules/

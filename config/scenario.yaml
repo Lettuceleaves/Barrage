@@ -1,8 +1,8 @@
 ---
 graphName: "未命名流程"
-startNodeId: "node_1772557056134_1"
+startNodeId: "node_1772558136511_1"
 nodes:
-- id: "node_1772557056134_1"
+- id: "node_1772558136511_1"
   type: "START"
   name: "开始节点"
   templateRef: null
@@ -10,13 +10,41 @@ nodes:
   resultTag: null
   saveContext: false
   transition:
-    next: "node_1772557058421_3"
+    next: "node_1772558137505_2"
     mode: "WAIT_FIXED"
     value: "1000"
   matchTransition: null
   mismatchTransition: null
   branches: null
-- id: "node_1772557057035_2"
+- id: "node_1772558137505_2"
+  type: "HTTP"
+  name: "HTTP请求"
+  templateRef: "/test/api1"
+  expectedValue: null
+  resultTag: null
+  saveContext: false
+  transition:
+    next: "node_1772558169958_5"
+    mode: "WAIT_FIXED"
+    value: "1000"
+  matchTransition: null
+  mismatchTransition: null
+  branches: null
+- id: "node_1772558151752_4"
+  type: "HTTP"
+  name: "HTTP请求"
+  templateRef: "/simulate/test2"
+  expectedValue: null
+  resultTag: null
+  saveContext: false
+  transition:
+    next: "node_1772558137505_2"
+    mode: "WAIT_FIXED"
+    value: "1000"
+  matchTransition: null
+  mismatchTransition: null
+  branches: null
+- id: "node_1772558169958_5"
   type: "CHANCE"
   name: "概率分支"
   templateRef: null
@@ -29,15 +57,15 @@ nodes:
   branches:
   - weight: 50
     transition:
-      next: "node_1772557059843_4"
+      next: "node_1772558151752_4"
       mode: "NO_DELAY"
       value: null
   - weight: 50
     transition:
-      next: "node_1772557060969_5"
+      next: "node_1772558175911_6"
       mode: "NO_DELAY"
       value: null
-- id: "node_1772557058421_3"
+- id: "node_1772558175911_6"
   type: "HTTP"
   name: "HTTP请求"
   templateRef: "/simulate/test1"
@@ -45,35 +73,7 @@ nodes:
   resultTag: null
   saveContext: false
   transition:
-    next: "node_1772557057035_2"
-    mode: "WAIT_FIXED"
-    value: "1000"
-  matchTransition: null
-  mismatchTransition: null
-  branches: null
-- id: "node_1772557059843_4"
-  type: "HTTP"
-  name: "HTTP请求"
-  templateRef: "/simulate/test2"
-  expectedValue: null
-  resultTag: null
-  saveContext: false
-  transition:
-    next: "node_1772557058421_3"
-    mode: "WAIT_FIXED"
-    value: "1000"
-  matchTransition: null
-  mismatchTransition: null
-  branches: null
-- id: "node_1772557060969_5"
-  type: "HTTP"
-  name: "HTTP请求"
-  templateRef: "/simulate/test3"
-  expectedValue: null
-  resultTag: null
-  saveContext: false
-  transition:
-    next: "node_1772557058421_3"
+    next: "node_1772558137505_2"
     mode: "WAIT_FIXED"
     value: "1000"
   matchTransition: null

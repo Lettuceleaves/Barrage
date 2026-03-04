@@ -65,7 +65,14 @@
       "Bash(cmd.exe /c \"md E:\\\\projects\\\\Barrage\\\\barrage-api\\\\target\" 2>&1)",
       "Bash(mvn -pl barrage-api -am compile 2>&1 | tail -20)",
       "Bash(mvn spotbugs:check -pl barrage-protocol 2>&1 | grep -A 5 \"Bug\\\\|BugInstance\\\\|found\\\\|warning\" | head -50)",
-      "Bash(find /home/letuc/projects/Barrage/barrage-protocol/target -name \"*.xml\" -o -name \"spotbugs*\" 2>/dev/null | head -20)"
+      "Bash(find /home/letuc/projects/Barrage/barrage-protocol/target -name \"*.xml\" -o -name \"spotbugs*\" 2>/dev/null | head -20)",
+      "Bash(grep -i \"spring\\\\|framework\\\\|jetty\\\\|tomcat\" /home/letuc/projects/Barrage/pom.xml /home/letuc/projects/Barrage/barrage-*/pom.xml)",
+      "Bash(mvn dependency:tree -f /home/letuc/projects/Barrage/pom.xml -q 2>/dev/null | head -50)",
+      "Bash(wc -l /home/letuc/projects/Barrage/barrage-*/src/main/java/com/barrage/*/*.java)",
+      "Bash(git -C /home/letuc/projects/Barrage log --oneline -10)",
+      "Bash(mvn clean install -DskipTests 2>&1)",
+      "Bash(mvn -pl barrage-api -P native package -DskipTests 2>&1)",
+      "Bash(mvn -pl barrage-api -P native native:compile -DskipTests 2>&1)"
     ]
   }
 }
