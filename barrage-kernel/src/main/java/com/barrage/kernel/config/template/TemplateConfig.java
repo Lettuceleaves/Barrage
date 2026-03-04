@@ -9,10 +9,12 @@ import com.fasterxml.jackson.dataformat.toml.TomlMapper;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Barrage HTTP 请求模板配置管理器。
@@ -152,13 +154,34 @@ public class TemplateConfig {
         newNode.put("headers", headers);
 
         // 4. 写回磁盘
-        try {
-            mapper.writeValue(file, root);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to save http.toml", e);
-        }
+        writeRoot(file, root);
     }
 
+
+    /**
+     * 批量替换所有模板（刷新语义：覆盖 http.toml 中的全部模板）。
+     * <p>
+     * 用于前端保存配置时将所有请求模板一次性同步到磁盘。
+     *
+     * @param templateList 模板列表，每项包含 name/method/path/body/headers
+     * @throws RuntimeException 如果文件写入失败
+     */
+    public static synchronized void saveAll(List<Map<String, String>> templateList) {
+        File file = getFile();
+        ObjectNode root = mapper.createObjectNode();
+        ArrayNode templates = root.putArray("templates");
+
+        for (Map<String, String> t : templateList) {
+            ObjectNode node = templates.addObject();
+            node.put("name",    t.getOrDefault("name",    ""));
+            node.put("method",  t.getOrDefault("method",  "GET"));
+            node.put("path",    t.getOrDefault("path",    "/"));
+            node.put("body",    t.getOrDefault("body",    ""));
+            node.put("headers", t.getOrDefault("headers", ""));
+        }
+
+        writeRoot(file, root);
+    }
     // --- 内部私有辅助方法 ---
 
     /**
@@ -167,13 +190,47 @@ public class TemplateConfig {
      * 包含防御性逻辑：如果全局配置尚未初始化，会尝试触发一次加载。
      */
     private static File getFile() {
-        String dir = BasicConfig.getConfigDir();
-        if (dir == null) {
+        String dir;
+        try {
+            dir = BasicConfig.getConfigDir();
+        } catch (IllegalStateException e) {
             // 防御性编程：如果 BasicConfig 还没初始化，尝试触发加载
             BasicConfig.load();
             dir = BasicConfig.getConfigDir();
         }
         return Path.of(dir, "http.toml").toFile();
+    }
+
+    /**
+     * 统一写回 TOML，并在失败时给出可定位的路径和权限信息。
+     */
+    private static void writeRoot(File file, ObjectNode root) {
+        try {
+            Path target = file.toPath();
+            Path parent = target.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            mapper.writeValue(file, root);
+        } catch (IOException e) {
+            String abs = file.getAbsolutePath();
+            String parentWritable = "unknown";
+            String fileWritable = "unknown";
+            try {
+                Path target = file.toPath();
+                Path parent = target.getParent();
+                if (parent != null) parentWritable = String.valueOf(Files.isWritable(parent));
+                if (Files.exists(target)) fileWritable = String.valueOf(Files.isWritable(target));
+            } catch (Exception ignore) {
+                // best effort diagnostics
+            }
+            throw new RuntimeException(
+                    "Failed to save http.toml at: " + abs +
+                            " (parent writable=" + parentWritable +
+                            ", file writable=" + fileWritable + ")",
+                    e
+            );
+        }
     }
 
     /**

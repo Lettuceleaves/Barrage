@@ -3,6 +3,8 @@ package com.barrage.engine.simulate.node;
 import com.barrage.engine.simulate.TransitionContext;
 import com.barrage.engine.simulate.context.SimulationContext;
 import com.barrage.engine.simulate.pool.NetworkInfrastructure;
+import com.barrage.kernel.config.basic.BasicConfig;
+import com.barrage.kernel.config.template.TemplateConfig;
 import com.barrage.protocol.HTTP.HttpResponseView;
 
 import java.lang.foreign.MemorySegment;
@@ -41,12 +43,13 @@ public class HttpNode extends GraphNode {
         NetworkInfrastructure infra = context.getNetworkInfrastructure();
 
         // =================================================================
-        // [New] 1. 模板渲染 (Request Generation)
+        // 1. 模板渲染 (Request Generation)
         // =================================================================
-        // 检查当前是否已经有数据，如果没有，则根据 templateRef 生成
-        // (为了演示，这里直接硬编码一个 Mock 请求，真实项目应调用 TemplateManager)
-        if (context.getDataAsSegment().byteSize() == 0) {
-            renderMockRequest(context);
+        // 每次执行都重新渲染，确保不同 HttpNode 使用各自的模板数据
+        context.setDataReference(0, 0);
+        if (!renderRequestFromTemplate(context)) {
+            handleFailure(context, 500);
+            return;
         }
 
         // 获取准备好的请求数据
@@ -96,32 +99,84 @@ public class HttpNode extends GraphNode {
     }
 
     /**
-     * [Mock] 模拟模板引擎：将 HTTP 报文写入用户的 RequestBuffer。
-     * <p>
-     * 实际项目中，这里应该调用 TemplateManager 根据 {@code templateRef} 动态生成数据。
-     *
-     * @param context 仿真上下文
+     * 根据 templateRef 渲染 HTTP 请求并写入用户私有 Request Buffer。
      */
-    private void renderMockRequest(SimulationContext context) {
-        // 构造一个合法的 HTTP 请求 (Host 改为你的目标地址)
-        // 注意：Host 头必须匹配你的目标服务器 IP/域名
-        String reqStr = "GET / HTTP/1.1\r\n" +
-                "Host: host.docker.internal:8089\r\n" +
-                "User-Agent: Barrage-Agent/1.0\r\n" +
-                "Connection: keep-alive\r\n" +
-                "\r\n";
+    private boolean renderRequestFromTemplate(SimulationContext context) {
+        String method = "GET";
+        String path = "/";
+        String body = "";
+        String headers = "";
 
-        byte[] reqBytes = reqStr.getBytes(StandardCharsets.US_ASCII);
+        if (templateRef != null && !templateRef.isBlank()) {
+            List<String> detail = TemplateConfig.get(templateRef);
+            if (detail != null && detail.size() >= 4) {
+                method = safe(detail.get(0), "GET").toUpperCase();
+                path = normalizePath(detail.get(1));
+                body = safe(detail.get(2), "");
+                headers = safe(detail.get(3), "");
+            }
+        }
 
-        // 1. 获取用户的私有 Request Buffer
+        String targetHost = BasicConfig.getIP() + ":" + BasicConfig.getPORT();
+        byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(method).append(" ").append(path).append(" HTTP/1.1\r\n");
+        sb.append("Host: ").append(targetHost).append("\r\n");
+        sb.append("User-Agent: Barrage-Agent/1.0\r\n");
+        appendExtraHeaders(sb, headers);
+        if (bodyBytes.length > 0) {
+            sb.append("Content-Length: ").append(bodyBytes.length).append("\r\n");
+        }
+        sb.append("Connection: keep-alive\r\n");
+        sb.append("\r\n");
+
+        byte[] headBytes = sb.toString().getBytes(StandardCharsets.UTF_8);
+        int totalLen = headBytes.length + bodyBytes.length;
+
         MemorySegment reqBuf = context.getRequestBuffer();
+        if (totalLen > reqBuf.byteSize()) {
+            System.err.printf("[HttpNode] Request exceeds buffer (%d > %d), template=%s%n",
+                    totalLen, reqBuf.byteSize(), templateRef);
+            return false;
+        }
 
-        // 2. 写入数据
-        MemorySegment.copy(MemorySegment.ofArray(reqBytes), 0, reqBuf, 0, reqBytes.length);
+        MemorySegment.copy(MemorySegment.ofArray(headBytes), 0, reqBuf, 0, headBytes.length);
+        if (bodyBytes.length > 0) {
+            MemorySegment.copy(MemorySegment.ofArray(bodyBytes), 0, reqBuf, headBytes.length, bodyBytes.length);
+        }
+        context.setDataReference(reqBuf.address(), totalLen);
+        return true;
+    }
 
-        // 3. 更新指针 (告诉 Context 数据在哪里)
-        // 注意：这里使用 Buffer 的绝对地址
-        context.setDataReference(reqBuf.address(), reqBytes.length);
+    private String safe(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private String normalizePath(String rawPath) {
+        if (rawPath == null || rawPath.isBlank()) return "/";
+        return rawPath.startsWith("/") ? rawPath : "/" + rawPath;
+    }
+
+    private void appendExtraHeaders(StringBuilder sb, String rawHeaders) {
+        if (rawHeaders == null || rawHeaders.isBlank()) return;
+        String[] pairs = rawHeaders.split(",");
+        for (String p : pairs) {
+            String line = p.trim();
+            if (line.isBlank()) continue;
+            int idx = line.indexOf(':');
+            if (idx <= 0 || idx == line.length() - 1) continue;
+            String key = line.substring(0, idx).trim();
+            String val = line.substring(idx + 1).trim();
+            if (key.isEmpty() || val.isEmpty()) continue;
+            // Host/Content-Length/Connection 由引擎统一管理，避免冲突
+            if ("host".equalsIgnoreCase(key) ||
+                "content-length".equalsIgnoreCase(key) ||
+                "connection".equalsIgnoreCase(key)) {
+                continue;
+            }
+            sb.append(key).append(": ").append(val).append("\r\n");
+        }
     }
 
     private void handleFailure(SimulationContext context, int errorCode) {

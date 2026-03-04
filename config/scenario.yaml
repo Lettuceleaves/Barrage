@@ -1,77 +1,81 @@
-graphName: "SmokeTestFlow"
-startNodeId: "node_start"
-
+---
+graphName: "未命名流程"
+startNodeId: "node_1772557056134_1"
 nodes:
-  # 1. 起始节点
-  - id: "node_start"
-    type: "START"
-    name: "User Init"
+- id: "node_1772557056134_1"
+  type: "START"
+  name: "开始节点"
+  templateRef: null
+  expectedValue: null
+  resultTag: null
+  saveContext: false
+  transition:
+    next: "node_1772557058421_3"
+    mode: "WAIT_FIXED"
+    value: "1000"
+  matchTransition: null
+  mismatchTransition: null
+  branches: null
+- id: "node_1772557057035_2"
+  type: "CHANCE"
+  name: "概率分支"
+  templateRef: null
+  expectedValue: null
+  resultTag: null
+  saveContext: false
+  transition: null
+  matchTransition: null
+  mismatchTransition: null
+  branches:
+  - weight: 50
     transition:
-      mode: "WAIT_FIXED"
-      value: "1000"
-      next: "node_login"
-
-  # 2. HTTP 节点 (模拟登录)
-  - id: "node_login"
-    type: "HTTP"
-    name: "Login Request"
-    templateRef: "tpl_login_001"
-    transition:
-      mode: "WAIT_FIXED"
-      value: "1000"
-      next: "node_check_response"
-
-  # 3. 条件节点 (检查登录是否成功)
-  # 逻辑：检查变量 "last_code" 是否等于 "200"
-  - id: "node_check_response"
-    type: "CONDITION"
-    name: "Check 200 OK"
-    targetVarName: "last_code"
-    expectedValue: "200" # Loader 会自动转为 byte[]
-    # 匹配成功的路径
-    matchTransition:
+      next: "node_1772557059843_4"
       mode: "NO_DELAY"
-      next: "node_random_behavior"
-    # 匹配失败的路径 (去失败终点)
-    mismatchTransition:
-      mode: "NO_DELAY"
-      next: "node_term_fail"
-
-  # 4. 概率分支节点 (流量分流)
-  - id: "node_random_behavior"
-    type: "CHANCE"
-    name: "Split Traffic"
-    branches:
-      - weight: 30
-        transition:
-          mode: "NO_DELAY"
-          next: "node_browsing" # 30% 去浏览
-      - weight: 70
-        transition:
-          mode: "WAIT_FIXED"
-          value: "1000"
-          next: "node_login" # 70% 直接下线
-
-  # 5. HTTP 节点 (浏览)
-  - id: "node_browsing"
-    type: "HTTP"
-    name: "Browse Items"
-    templateRef: "tpl_browse_list"
+      value: null
+  - weight: 50
     transition:
-      mode: "WAIT_FIXED"
-      value: "1000"
-      next: "node_start"
-
-  # 6. 终止节点 (成功)
-  - id: "node_term_success"
-    type: "TERMINAL"
-    name: "Finished OK"
-    resultTag: "SUCCESS"
-    saveContext: true
-
-  # 7. 终止节点 (失败)
-  - id: "node_term_fail"
-    type: "TERMINAL"
-    name: "Login Failed"
-    resultTag: "FAIL_LOGIN"
-    saveContext: false
+      next: "node_1772557060969_5"
+      mode: "NO_DELAY"
+      value: null
+- id: "node_1772557058421_3"
+  type: "HTTP"
+  name: "HTTP请求"
+  templateRef: "/simulate/test1"
+  expectedValue: null
+  resultTag: null
+  saveContext: false
+  transition:
+    next: "node_1772557057035_2"
+    mode: "WAIT_FIXED"
+    value: "1000"
+  matchTransition: null
+  mismatchTransition: null
+  branches: null
+- id: "node_1772557059843_4"
+  type: "HTTP"
+  name: "HTTP请求"
+  templateRef: "/simulate/test2"
+  expectedValue: null
+  resultTag: null
+  saveContext: false
+  transition:
+    next: "node_1772557058421_3"
+    mode: "WAIT_FIXED"
+    value: "1000"
+  matchTransition: null
+  mismatchTransition: null
+  branches: null
+- id: "node_1772557060969_5"
+  type: "HTTP"
+  name: "HTTP请求"
+  templateRef: "/simulate/test3"
+  expectedValue: null
+  resultTag: null
+  saveContext: false
+  transition:
+    next: "node_1772557058421_3"
+    mode: "WAIT_FIXED"
+    value: "1000"
+  matchTransition: null
+  mismatchTransition: null
+  branches: null

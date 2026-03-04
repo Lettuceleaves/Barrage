@@ -232,6 +232,8 @@ public class NetworkInfrastructure implements AutoCloseable {
                 slot.pendingTasks.offer(task);
                 try {
                     prepSend(slot.fd, connIdx, task.requestData);
+                    System.out.printf("[IoLane-%d] Slot %d SEND userId=%d (%d bytes)%n",
+                            id, connIdx, task.userId, task.requestData.byteSize());
                 } catch (IOException e) {
                     task.future.completeExceptionally(e);
                     slot.pendingTasks.pollLast(); // Revert offer
@@ -270,6 +272,8 @@ public class NetworkInfrastructure implements AutoCloseable {
                             activeBuffer.address());
                     task.userSlotMeta.set(ValueLayout.JAVA_LONG, UserSlotLayout.OFFSET_RESP_LEN, (long) len);
                     task.future.complete(null);
+                    System.out.printf("[IoLane-%d] Slot %d RECV userId=%d (%d bytes)%n",
+                            id, connIdx, task.userId, len);
                 }
 
                 // Next Read
@@ -319,6 +323,7 @@ public class NetworkInfrastructure implements AutoCloseable {
                 if (s.connect(ip, port)) {
                     slots[idx].fd = s.getFd();
                     prepRead(slots[idx].fd, idx, 0, slots[idx].ringBuffers[0]);
+                    System.out.printf("[IoLane-%d] Slot %d connected (FD=%d)%n", id, idx, slots[idx].fd);
                 } else {
                     System.err.println("[IoLane] Initial connect failed for slot " + idx + ", scheduling async retry.");
                     slots[idx].fd = -1;
@@ -378,7 +383,7 @@ public class NetworkInfrastructure implements AutoCloseable {
         }
 
         private void handleIoError(int idx, int errCode) {
-            // System.err.printf("[IoLane-%d] Error on slot %d: %d%n", id, idx, errCode);
+            System.err.printf("[IoLane-%d] IO Error on slot %d: errCode=%d, triggering reconnect%n", id, idx, errCode);
             long oldFd = slots[idx].fd;
             if (oldFd > 0) {
                 try {

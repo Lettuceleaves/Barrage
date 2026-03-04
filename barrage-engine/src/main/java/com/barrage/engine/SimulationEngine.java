@@ -67,9 +67,9 @@ public final class SimulationEngine {
     public void start() throws IOException {
         running = true;
         this.networkInfra = new NetworkInfrastructure();
-        int totalUsers = 1_000_00;
+        int totalUsers = 1;
 
-        UserGroupContext ctx = new UserGroupContext(graph, totalUsers, 100000);
+        UserGroupContext ctx = new UserGroupContext(graph, totalUsers, 0);
         userGroups.add(ctx);
         vThreadExecutor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("agent-", 0).factory());
 

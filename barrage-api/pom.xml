@@ -10,5 +10,73 @@
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>barrage-api</artifactId>
+    <packaging>jar</packaging>
+
+    <dependencies>
+        <!-- Barrage 内核（BasicConfig、TemplateConfig） -->
+        <dependency>
+            <groupId>com.barrage</groupId>
+            <artifactId>barrage-kernel</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- Barrage 引擎（BatchEngine、ServerEngine） -->
+        <dependency>
+            <groupId>com.barrage</groupId>
+            <artifactId>barrage-engine</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- Barrage 协议（HttpTemplate） -->
+        <dependency>
+            <groupId>com.barrage</groupId>
+            <artifactId>barrage-protocol</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- SpotBugs 注解（仅编译期） -->
+        <dependency>
+            <groupId>com.github.spotbugs</groupId>
+            <artifactId>spotbugs-annotations</artifactId>
+            <version>4.8.6</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- 生成可执行的 fat-jar，包含所有依赖 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <version>3.7.1</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.barrage.api.BarrageApiServer</mainClass>
+                        </manifest>
+                    </archive>
+                    <descriptorRefs>
+                        <descriptorRef>jar-with-dependencies</descriptorRef>
+                    </descriptorRefs>
+                    <appendAssemblyId>false</appendAssemblyId>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>make-assembly</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
 
 </project>
